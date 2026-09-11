@@ -304,7 +304,7 @@ export default function RequestDetailsTab() {
 
       <Card padding="none">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[880px]">
+          <table className="w-full min-w-[940px]">
             <thead>
               <tr className="border-b border-black/5 dark:border-white/5">
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Timestamp</th>
@@ -345,7 +345,7 @@ export default function RequestDetailsTab() {
                     <td className="whitespace-nowrap p-4 text-sm text-text-main">
                       {new Date(detail.timestamp).toLocaleString()}
                     </td>
-                    <td className="max-w-[260px] truncate p-4 font-mono text-sm text-text-main">
+                    <td className="max-w-[200px] truncate p-4 font-mono text-sm text-text-main">
                       {detail.model}
                     </td>
                     <td className="max-w-[180px] truncate p-4 text-sm text-text-main">
@@ -379,7 +379,7 @@ export default function RequestDetailsTab() {
                         {detail.status}
                       </span>
                     </td>
-                    <td className="max-w-[320px] p-4 text-xs font-mono text-text-muted" title={detail.errorMessage || ""}>
+                    <td className="max-w-[220px] p-4 text-xs font-mono text-text-muted" title={detail.errorMessage || ""}>
                       {detail.errorMessage ? (
                         <span className="block truncate text-red-600">{detail.errorMessage}</span>
                       ) : <span>—</span>}
