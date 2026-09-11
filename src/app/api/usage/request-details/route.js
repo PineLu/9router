@@ -2,6 +2,35 @@ import { NextResponse } from "next/server";
 import { getRequestDetails } from "@/lib/usageDb";
 
 /**
+ * Pull a one-line error summary out of a stored request detail (before its
+ * bodies get redacted). Returns null when there is no error info.
+ */
+function extractErrorMessage(d) {
+  if (!d || d.status === "success") return null;
+  const cands = [
+    d?.response?.error,
+    d?.providerResponse?.error,
+    d?.response?.message,
+    d?.providerResponse?.message,
+    d?.error,
+  ];
+  for (const c of cands) {
+    if (typeof c === "string" && c.trim()) return c.trim().slice(0, 300);
+    if (c && typeof c === "object") {
+      const m = c.message || c.error || c.msg;
+      if (typeof m === "string" && m.trim()) return m.trim().slice(0, 300);
+      try {
+        const s = JSON.stringify(c);
+        if (s && s !== "{}") return s.slice(0, 300);
+      } catch {
+        // ignore stringify failures
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * GET /api/usage/request-details
  * Query parameters: page, pageSize (1-100), provider, model, connectionId, status, startDate, endDate
  */
@@ -53,8 +82,9 @@ export async function GET(request) {
     // wholesale lets any dashboard-authenticated user (or, if requireLogin is
     // disabled, anyone) read every user's conversation history. Keep the
     // metadata (model, tokens, latency, status) but drop message content.
+    // A one-line error summary is extracted first so failures stay diagnosable.
     const redactedDetails = (result.details || []).map((d) => {
-      const redacted = { ...d };
+      const redacted = { ...d, errorMessage: extractErrorMessage(d) };
       for (const key of ["request", "providerRequest", "providerResponse", "response"]) {
         if (redacted[key] !== undefined) {
           redacted[key] = { redacted: true };

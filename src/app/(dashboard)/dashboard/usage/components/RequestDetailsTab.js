@@ -386,6 +386,12 @@ export default function RequestDetailsTab() {
                   {selectedDetail.status}
                 </span>
               </div>
+              {selectedDetail.errorMessage && (
+                <div>
+                  <span className="text-text-muted">Error:</span>{" "}
+                  <span className="text-red-600 font-mono break-all">{selectedDetail.errorMessage}</span>
+                </div>
+              )}
               <div>
                 <span className="text-text-muted">Latency:</span>{" "}
                 <span className="text-text-main font-mono">
