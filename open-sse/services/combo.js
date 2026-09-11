@@ -87,6 +87,93 @@ export function reorderByCapabilities(models, required) {
  */
 const comboRotationState = new Map();
 
+/**
+ * Combo-level failure memory: remembers per-(combo, model) failures so a
+ * known-bad model is skipped for a cooldown instead of being retried on every
+ * request (e.g. a 404 model hit on every request). Success clears the record
+ * (natural half-open recovery).
+ * @type {Map<string, { failCount: number, unavailableUntil: number, lastStatus: number|null }>}
+ */
+const comboHealthState = new Map();
+
+// Single failure cools briefly; 3+ consecutive failures cool longer.
+const COMBO_COOL_SINGLE_MS = 2 * 60 * 1000;
+const COMBO_COOL_REPEAT_MS = 15 * 60 * 1000;
+// Provider-reported retry windows (429 "Try again in 31m") are honored but capped.
+const COMBO_COOL_MAX_MS = 30 * 60 * 1000;
+// Consecutive failures needed to escalate from single to repeat cooldown.
+const COMBO_COOL_REPEAT_AFTER = 3;
+// Transient errors never get combo-level cooling (existing 5s wait covers them).
+const COMBO_TRANSIENT_STATUSES = new Set([502, 503, 504]);
+
+export function getComboHealthKey(comboName, model) {
+  return `${comboName || "__default__"}::${model}`;
+}
+
+/**
+ * Parse a provider-reported retry window into ms: an ISO retryAfter timestamp,
+ * or "Try again in 31m/45s/2h" embedded in the error text. Returns 0 if none.
+ */
+function parseUpstreamRetryMs(errorText, retryAfter, now = Date.now()) {
+  if (retryAfter) {
+    const ts = new Date(retryAfter).getTime();
+    if (Number.isFinite(ts) && ts > now) return ts - now;
+  }
+  if (typeof errorText === "string") {
+    const m = errorText.match(/try again in\s+(\d+(?:\.\d+)?)\s*(h(?:ours?)?|m(?:in(?:utes?)?)?|s(?:ec(?:onds?)?)?)/i);
+    if (m) {
+      const n = Number.parseFloat(m[1]);
+      const unit = m[2].toLowerCase();
+      if (unit.startsWith("h")) return n * 3600 * 1000;
+      if (unit.startsWith("m")) return n * 60 * 1000;
+      return n * 1000;
+    }
+  }
+  return 0;
+}
+
+export function isComboModelCooling(comboName, model, now = Date.now()) {
+  const rec = comboHealthState.get(getComboHealthKey(comboName, model));
+  return !!rec && rec.unavailableUntil > now;
+}
+
+/**
+ * Record a combo-model failure. Returns the cooling applied in ms (0 = none).
+ * 404/401/403 → 2min, ≥3 consecutive → 15min. 429 → upstream retry window
+ * capped at 30min (2min when unstated). 502/503/504 and others → no cooling.
+ */
+export function recordComboFailure(comboName, model, status, errorText, retryAfter, now = Date.now()) {
+  if (COMBO_TRANSIENT_STATUSES.has(status)) return 0;
+  const key = getComboHealthKey(comboName, model);
+  const prev = comboHealthState.get(key);
+  if (status === 429) {
+    const upstream = parseUpstreamRetryMs(errorText, retryAfter, now);
+    const cooldown = Math.min(upstream > 0 ? upstream : COMBO_COOL_SINGLE_MS, COMBO_COOL_MAX_MS);
+    comboHealthState.set(key, { failCount: (prev?.failCount || 0) + 1, unavailableUntil: now + cooldown, lastStatus: status });
+    return cooldown;
+  }
+  if (status === 404 || status === 401 || status === 403) {
+    const failCount = (prev?.failCount || 0) + 1;
+    const cooldown = failCount >= COMBO_COOL_REPEAT_AFTER ? COMBO_COOL_REPEAT_MS : COMBO_COOL_SINGLE_MS;
+    comboHealthState.set(key, { failCount, unavailableUntil: now + cooldown, lastStatus: status });
+    return cooldown;
+  }
+  return 0;
+}
+
+export function recordComboSuccess(comboName, model) {
+  comboHealthState.delete(getComboHealthKey(comboName, model));
+}
+
+/** Clear combo health memory: one combo, or all when comboName is omitted. */
+export function resetComboHealth(comboName) {
+  if (!comboName) { comboHealthState.clear(); return; }
+  const prefix = `${comboName}::`;
+  for (const key of comboHealthState.keys()) {
+    if (key.startsWith(prefix)) comboHealthState.delete(key);
+  }
+}
+
 // Trailing run of items after the last assistant/model turn = the current user
 // turn. It may span several messages (e.g. text + image split across blocks),
 // so we return all of them. History media (older turns) must not pin the combo
@@ -243,6 +330,7 @@ export function getRotatedModels(models, comboName, strategy, stickyLimit = 1) {
 export function resetComboRotation(comboName) {
   if (comboName) comboRotationState.delete(comboName);
   else comboRotationState.clear();
+  resetComboHealth(comboName);
 }
 
 /**
@@ -293,13 +381,24 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
     }
   }
   
+  // Skip models in combo-level cooling. If every model is cooling, try them
+  // anyway (hard try) rather than failing fast with 503.
+  const now = Date.now();
+  const availableModels = rotatedModels.filter((m) => !isComboModelCooling(comboName, m, now));
+  let attemptModels = rotatedModels;
+  if (availableModels.length > 0 && availableModels.length < rotatedModels.length) {
+    const skipped = rotatedModels.filter((m) => !availableModels.includes(m));
+    log.info("COMBO", `skipping cooling models: ${skipped.join(", ")}`);
+    attemptModels = availableModels;
+  }
+
   let lastError = null;
   let earliestRetryAfter = null;
   let lastStatus = null;
 
-  for (let i = 0; i < rotatedModels.length; i++) {
-    const modelStr = rotatedModels[i];
-    log.info("COMBO", `Trying model ${i + 1}/${rotatedModels.length}: ${modelStr}`);
+  for (let i = 0; i < attemptModels.length; i++) {
+    const modelStr = attemptModels[i];
+    log.info("COMBO", `Trying model ${i + 1}/${attemptModels.length}: ${modelStr}`);
 
     try {
       const result = await handleSingleModel(body, modelStr);
@@ -307,6 +406,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       // Success (2xx) - return response
       if (result.ok) {
         log.info("COMBO", `Model ${modelStr} succeeded`);
+        recordComboSuccess(comboName, modelStr);
         return result;
       }
 
@@ -333,6 +433,12 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
 
       // Check if should fallback to next model
       const { shouldFallback, cooldownMs } = checkFallbackError(result.status, errorText);
+
+      // Combo-level failure memory: known-bad models are skipped on later requests.
+      const comboCooldownMs = recordComboFailure(comboName, modelStr, result.status, errorText, retryAfter);
+      if (comboCooldownMs > 0) {
+        log.info("COMBO", `Model ${modelStr} cooling for ${Math.round(comboCooldownMs / 1000)}s`, { status: result.status });
+      }
 
       if (!shouldFallback) {
         log.warn("COMBO", `Model ${modelStr} failed (no fallback)`, { status: result.status });
