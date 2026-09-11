@@ -100,7 +100,9 @@ function sortData(dataMap, pendingMap = {}, sortBy, sortOrder) {
       const inputCost = totalTokens > 0 ? nonCachedInput * (totalCost / totalTokens) : 0;
       const cachedCost = totalTokens > 0 ? cachedTokens * (totalCost / totalTokens) : 0;
       const outputCost = totalTokens > 0 ? (data.completionTokens || 0) * (totalCost / totalTokens) : 0;
-      return { ...data, key, totalTokens, totalCost, inputCost, cachedCost, outputCost, pending: pendingMap[key] || 0 };
+      const healthTotal = (data.healthSuccess || 0) + (data.healthFailed || 0);
+      const healthRate = healthTotal > 0 ? (data.healthSuccess || 0) / healthTotal : -1;
+      return { ...data, key, totalTokens, totalCost, inputCost, cachedCost, outputCost, healthRate, pending: pendingMap[key] || 0 };
     })
     .sort((a, b) => {
       let valA = a[sortBy];
@@ -156,12 +158,22 @@ function groupDataByKey(data, keyField) {
   return Object.values(groups);
 }
 
+function fmtRate(frac) {
+  return frac >= 0 ? `${(frac * 100).toFixed(1)}%` : "—";
+}
+
+function summaryRate(summary) {
+  const s = summary.healthSuccess || 0, f = summary.healthFailed || 0, t = s + f;
+  return t > 0 ? s / t : -1;
+}
+
 const MODEL_COLUMNS = [
   { field: "rawModel", label: "Model" },
   { field: "provider", label: "Provider" },
   { field: "requests", label: "Requests", align: "right" },
   { field: "healthSuccess", label: "成功", align: "right" },
   { field: "healthFailed", label: "失败", align: "right" },
+  { field: "healthRate", label: "健康度", align: "right" },
   { field: "lastUsed", label: "Last Used", align: "right" },
 ];
 
@@ -172,6 +184,7 @@ const ACCOUNT_COLUMNS = [
   { field: "requests", label: "Requests", align: "right" },
   { field: "healthSuccess", label: "成功", align: "right" },
   { field: "healthFailed", label: "失败", align: "right" },
+  { field: "healthRate", label: "健康度", align: "right" },
   { field: "lastUsed", label: "Last Used", align: "right" },
 ];
 
@@ -339,6 +352,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
               <td className="px-6 py-3 text-right">{fmt(group.summary.requests)}</td>
               <td className="px-6 py-3 text-right text-green-600">{fmt(group.summary.healthSuccess)}</td>
               <td className="px-6 py-3 text-right text-red-600">{fmt(group.summary.healthFailed)}</td>
+              <td className="px-6 py-3 text-right font-medium">{fmtRate(summaryRate(group.summary))}</td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(group.summary.lastUsed)}</td>
             </>
           ),
@@ -349,6 +363,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
               <td className="px-6 py-3 text-right">{fmt(item.requests)}</td>
               <td className="px-6 py-3 text-right text-green-600">{fmt(item.healthSuccess || 0)}</td>
               <td className="px-6 py-3 text-right text-red-600">{fmt(item.healthFailed || 0)}</td>
+              <td className="px-6 py-3 text-right font-medium">{fmtRate(item.healthRate ?? -1)}</td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(item.lastUsed)}</td>
             </>
           ),
@@ -377,6 +392,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
               <td className="px-6 py-3 text-right">{fmt(group.summary.requests)}</td>
               <td className="px-6 py-3 text-right text-green-600">{fmt(group.summary.healthSuccess)}</td>
               <td className="px-6 py-3 text-right text-red-600">{fmt(group.summary.healthFailed)}</td>
+              <td className="px-6 py-3 text-right font-medium">{fmtRate(summaryRate(group.summary))}</td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(group.summary.lastUsed)}</td>
             </>
           ),
@@ -388,6 +404,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
               <td className="px-6 py-3 text-right">{fmt(item.requests)}</td>
               <td className="px-6 py-3 text-right text-green-600">{fmt(item.healthSuccess || 0)}</td>
               <td className="px-6 py-3 text-right text-red-600">{fmt(item.healthFailed || 0)}</td>
+              <td className="px-6 py-3 text-right font-medium">{fmtRate(item.healthRate ?? -1)}</td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(item.lastUsed)}</td>
             </>
           ),
