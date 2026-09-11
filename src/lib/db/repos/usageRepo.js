@@ -655,7 +655,8 @@ export async function getUsageStats(period = "all") {
   }
 
   // Health breakdown (success / failed) from per-request details, same period window.
-  // Note: requestDetails retains ~1000 latest rows, so long periods reflect the retained window.
+  // Note: requestDetails retains a capped window (see observabilityMaxRecords),
+  // so long periods only reflect the retained rows.
   try {
     let healthCutoff = null;
     if (period === "today") {
@@ -673,7 +674,8 @@ export async function getUsageStats(period = "all") {
       if (r.status === "success") ok += r.c;
       else fail += r.c;
     }
-    stats.health = { success: ok, failed: fail, total: ok + fail, successRate: ok + fail > 0 ? Math.round(ok / (ok + fail) * 1000) / 10 : 0 };
+    const retainedRow = db.get(`SELECT COUNT(*) as c FROM requestDetails`);
+    stats.health = { success: ok, failed: fail, total: ok + fail, successRate: ok + fail > 0 ? Math.round(ok / (ok + fail) * 1000) / 10 : 0, retained: retainedRow ? retainedRow.c : 0 };
   } catch {
     stats.health = { success: 0, failed: 0, total: 0, successRate: 0 };
   }

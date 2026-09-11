@@ -19,6 +19,11 @@ export default function OverviewCards({ stats }) {
         <span className="text-[10px] text-text-muted">
           {stats.health ? `✓${fmt(stats.health.success)} ✗${fmt(stats.health.failed)} / ${fmt(stats.health.total)}` : "—"}
         </span>
+        {stats.health?.retained > 0 && (
+          <span className="text-[10px] text-text-muted" title="明细仅保留最近 N 条，长周期健康度只覆盖保留窗口">
+            近{fmt(stats.health.retained)}条内统计
+          </span>
+        )}
       </Card>
       <Card className="flex min-w-0 flex-col gap-1 px-4 py-3">
         <span className="text-text-muted text-sm uppercase font-semibold">Total Input Tokens</span>

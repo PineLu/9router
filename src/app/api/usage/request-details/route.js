@@ -32,7 +32,7 @@ function extractErrorMessage(d) {
 
 /**
  * GET /api/usage/request-details
- * Query parameters: page, pageSize (1-100), provider, model, connectionId, status, startDate, endDate
+ * Query parameters: page, pageSize (1-100), provider, model, connectionId, status, error, startDate, endDate
  */
 export async function GET(request) {
   try {
@@ -46,6 +46,7 @@ export async function GET(request) {
     const model = searchParams.get("model");
     const connectionId = searchParams.get("connectionId");
     const status = searchParams.get("status");
+    const error = searchParams.get("error");
     const startDate = searchParams.get("startDate");
     const endDate = searchParams.get("endDate");
     
@@ -72,10 +73,20 @@ export async function GET(request) {
     if (model) filter.model = model;
     if (connectionId) filter.connectionId = connectionId;
     if (status) filter.status = status;
+    if (error) filter.error = error;
     if (startDate) filter.startDate = startDate;
     if (endDate) filter.endDate = endDate;
     
     const result = await getRequestDetails(filter);
+
+    // Resolve connectionId -> human-readable account name (best-effort)
+    let connMap = {};
+    try {
+      const { getProviderConnections } = await import("@/lib/db/repos/connectionsRepo.js");
+      for (const c of (await getProviderConnections()) || []) {
+        connMap[c.id] = c.name || c.email || String(c.id).slice(0, 8);
+      }
+    } catch { /* name resolution is best-effort */ }
 
     // Redact conversation payloads: the stored details include full request
     // bodies (user prompts, tool calls) and provider responses. Returning them
@@ -85,6 +96,7 @@ export async function GET(request) {
     // A one-line error summary is extracted first so failures stay diagnosable.
     const redactedDetails = (result.details || []).map((d) => {
       const redacted = { ...d, errorMessage: extractErrorMessage(d) };
+      if (d?.connectionId) redacted.accountName = connMap[d.connectionId] || String(d.connectionId).slice(0, 8);
       for (const key of ["request", "providerRequest", "providerResponse", "response"]) {
         if (redacted[key] !== undefined) {
           redacted[key] = { redacted: true };

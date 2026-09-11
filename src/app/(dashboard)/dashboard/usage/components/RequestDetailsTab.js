@@ -139,8 +139,11 @@ export default function RequestDetailsTab() {
   const [providerNameCache, setProviderNameCache] = useState(null);
   const [filters, setFilters] = useState(() => ({
     provider: "",
+    status: "",
+    error: "",
     ...presetRange("today"),
   }));
+  const [errorInput, setErrorInput] = useState("");
   const [activePreset, setActivePreset] = useState("today");
 
   const applyPreset = (key) => {
@@ -175,6 +178,8 @@ export default function RequestDetailsTab() {
         pageSize: pagination.pageSize.toString()
       });
       if (filters.provider) params.append("provider", filters.provider);
+      if (filters.status) params.append("status", filters.status);
+      if (filters.error) params.append("error", filters.error);
       if (filters.startDate) params.append("startDate", filters.startDate);
       if (filters.endDate) params.append("endDate", filters.endDate);
 
@@ -212,7 +217,8 @@ export default function RequestDetailsTab() {
   };
 
   const handleClearFilters = () => {
-    setFilters({ provider: "", ...presetRange("today") });
+    setFilters({ provider: "", status: "", error: "", ...presetRange("today") });
+    setErrorInput("");
     setPagination((prev) => ({ ...prev, page: 1 }));
     setActivePreset("today");
   };
@@ -261,6 +267,42 @@ export default function RequestDetailsTab() {
           </div>
           
           <div className="flex min-w-0 flex-col gap-2">
+            <label htmlFor="status-filter" className="text-sm font-medium text-text-main">Status</label>
+            <select
+              id="status-filter"
+              value={filters.status}
+              onChange={(e) => updateFilters({ status: e.target.value })}
+              className={cn(
+                "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
+                "text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
+                "w-full min-w-0 cursor-pointer"
+              )}
+              style={{ colorScheme: 'auto' }}
+            >
+              <option value="">All Status</option>
+              <option value="success">Success</option>
+              <option value="error">Error</option>
+            </select>
+          </div>
+
+          <div className="flex min-w-0 flex-col gap-2">
+            <label htmlFor="error-filter" className="text-sm font-medium text-text-main">Error contains</label>
+            <input
+              id="error-filter"
+              type="text"
+              value={errorInput}
+              onChange={(e) => setErrorInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") updateFilters({ error: errorInput.trim() }); }}
+              onBlur={() => { if (errorInput.trim() !== (filters.error || "")) updateFilters({ error: errorInput.trim() }); }}
+              placeholder="e.g. empty response"
+              className={cn(
+                "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
+                "w-full min-w-0 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20"
+              )}
+            />
+          </div>
+
+          <div className="flex min-w-0 flex-col gap-2">
             <label htmlFor="start-date-filter" className="text-sm font-medium text-text-main">Start Date</label>
             <input
               id="start-date-filter"
@@ -293,7 +335,7 @@ export default function RequestDetailsTab() {
             <Button 
               variant="ghost" 
               onClick={handleClearFilters}
-              disabled={!filters.provider && !filters.startDate && !filters.endDate}
+              disabled={!filters.provider && !filters.status && !filters.error && !filters.startDate && !filters.endDate}
               className="w-full"
             >
               Clear Filters
@@ -310,6 +352,7 @@ export default function RequestDetailsTab() {
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Timestamp</th>
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Model</th>
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Provider</th>
+                <th className="text-left p-4 text-sm font-semibold text-text-main">Account</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Input Tokens</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Cached</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Cache Creation</th>
@@ -353,6 +396,9 @@ export default function RequestDetailsTab() {
                          {getProviderName(detail.provider, providerNameCache)}
                        </span>
                      </td>
+                    <td className="max-w-[140px] truncate p-4 text-sm text-text-muted" title={detail.connectionId || ""}>
+                      {detail.accountName || "—"}
+                    </td>
                     <td className="p-4 text-sm text-text-main text-right font-mono">
                       {getInputTokens(detail.tokens).toLocaleString()}
                     </td>

@@ -165,6 +165,24 @@ export function recordComboSuccess(comboName, model) {
   comboHealthState.delete(getComboHealthKey(comboName, model));
 }
 
+/** Snapshot all cooling (combo, model) records for dashboard display. */
+export function getComboHealthSnapshot(now = Date.now()) {
+  const out = [];
+  for (const [key, rec] of comboHealthState) {
+    const sep = key.indexOf("::");
+    out.push({
+      combo: sep >= 0 ? key.slice(0, sep) : key,
+      model: sep >= 0 ? key.slice(sep + 2) : "",
+      failCount: rec.failCount || 0,
+      lastStatus: rec.lastStatus ?? null,
+      unavailableUntil: rec.unavailableUntil || 0,
+      remainingMs: Math.max(0, (rec.unavailableUntil || 0) - now),
+      cooling: (rec.unavailableUntil || 0) > now,
+    });
+  }
+  return out;
+}
+
 /** Clear combo health memory: one combo, or all when comboName is omitted. */
 export function resetComboHealth(comboName) {
   if (!comboName) { comboHealthState.clear(); return; }

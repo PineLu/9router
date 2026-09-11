@@ -52,6 +52,7 @@ export default function CombosPage() {
   const [activeProviders, setActiveProviders] = useState([]);
   const [comboStrategies, setComboStrategies] = useState({});
   const [capacityAdapter, setCapacityAdapter] = useState(EMPTY_CAPACITY_ADAPTER);
+  const [cooling, setCooling] = useState([]);
   const { getCaps } = useModelCaps();
   const [confirmState, setConfirmState] = useState(null);
   const { copied, copy } = useCopyToClipboard();
@@ -62,14 +63,19 @@ export default function CombosPage() {
 
   const fetchData = async () => {
     try {
-      const [combosRes, providersRes, settingsRes] = await Promise.all([
+      const [combosRes, providersRes, settingsRes, healthRes] = await Promise.all([
         fetch("/api/combos"),
         fetch("/api/providers"),
         fetch("/api/settings"),
+        fetch("/api/combos/health"),
       ]);
       const combosData = await combosRes.json();
       const providersData = await providersRes.json();
       const settingsData = settingsRes.ok ? await settingsRes.json() : {};
+      if (healthRes.ok) {
+        const healthData = await healthRes.json();
+        setCooling((healthData.cooling || []).filter((c) => c.cooling));
+      }
       
       // Only LLM combos here - webSearch/webFetch combos belong to media-providers/web
       if (combosRes.ok) setCombos((combosData.combos || []).filter(c => !c.kind || c.kind === "llm"));
@@ -211,6 +217,24 @@ export default function CombosPage() {
           Create Combo
         </Button>
       </div>
+
+      {/* Cooling banner */}
+      {cooling.length > 0 && (
+        <Card padding="sm" className="border-amber-500/30 bg-amber-500/5">
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center gap-2 text-sm font-medium text-text-main">
+              <span className="material-symbols-outlined text-[18px] text-amber-500">schedule</span>
+              {cooling.length} model{cooling.length > 1 ? "s" : ""} cooling — skipped on next requests
+            </div>
+            {cooling.map((c) => (
+              <div key={`${c.combo}::${c.model}`} className="text-xs text-text-muted font-mono">
+                {c.combo} / {c.model} · fails {c.failCount} · status {c.lastStatus ?? "?"} ·
+                {" "}resumes in {Math.ceil(c.remainingMs / 1000)}s
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {/* Combos List */}
       {combos.length === 0 ? (
