@@ -259,7 +259,11 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
       : Math.min(resetsAtMs - Date.now(), MAX_RATE_LIMIT_COOLDOWN_MS);
     newBackoffLevel = 0;
   } else {
-    ({ shouldFallback, cooldownMs, newBackoffLevel } = checkFallbackError(status, errorText, backoffLevel));
+    // Pass resetsAtMs as retryAfter so 429 honors upstream retry windows
+    // ("Try again in Nm" in errorText or ISO timestamp), capped at 30min.
+    // Same policy as combo-level recordComboFailure.
+    const retryAfterIso = resetsAtMs && resetsAtMs > Date.now() ? new Date(resetsAtMs).toISOString() : null;
+    ({ shouldFallback, cooldownMs, newBackoffLevel } = checkFallbackError(status, errorText, backoffLevel, retryAfterIso));
   }
   if (!shouldFallback) return { shouldFallback: false, cooldownMs: 0 };
 

@@ -1,4 +1,4 @@
-import { ERROR_RULES, BACKOFF_CONFIG, TRANSIENT_COOLDOWN_MS } from "../config/errorConfig.js";
+import { ERROR_RULES, BACKOFF_CONFIG, TRANSIENT_COOLDOWN_MS, MAX_RATE_LIMIT_COOLDOWN_MS } from "../config/errorConfig.js";
 
 /**
  * Calculate exponential backoff cooldown for rate limits (429)
@@ -15,15 +15,30 @@ export function getQuotaCooldown(backoffLevel = 0) {
 /**
  * Check if error should trigger account fallback (switch to next account)
  * Config-driven: matches ERROR_RULES top-to-bottom (text rules first, then status)
+ * 429 with an upstream retry window ("Try again in Nm" / retryAfter) honors the
+ * window (capped at MAX_RATE_LIMIT_COOLDOWN_MS); without one falls back to
+ * exponential backoff. Same policy as combo-level recordComboFailure.
  * @param {number} status - HTTP status code
  * @param {string} errorText - Error message text
  * @param {number} backoffLevel - Current backoff level for exponential backoff
+ * @param {string|null} retryAfter - Optional ISO retry-after timestamp from upstream
  * @returns {{ shouldFallback: boolean, cooldownMs: number, newBackoffLevel?: number }}
  */
-export function checkFallbackError(status, errorText, backoffLevel = 0) {
+export function checkFallbackError(status, errorText, backoffLevel = 0, retryAfter = null) {
   const lowerError = errorText
     ? (typeof errorText === "string" ? errorText : JSON.stringify(errorText)).toLowerCase()
     : "";
+
+  // 429 first: upstream retry window wins over blind backoff.
+  if (status === 429) {
+    const upstream = parseUpstreamRetryMs(
+      typeof errorText === "string" ? errorText : JSON.stringify(errorText ?? ""),
+      retryAfter
+    );
+    if (upstream > 0) {
+      return { shouldFallback: true, cooldownMs: Math.min(upstream, MAX_RATE_LIMIT_COOLDOWN_MS) };
+    }
+  }
 
   for (const rule of ERROR_RULES) {
     // Text-based rule: match substring in error message
@@ -100,6 +115,39 @@ export function formatRetryAfter(rateLimitedUntil) {
   if (m > 0) parts.push(`${m}m`);
   if (s > 0 || parts.length === 0) parts.push(`${s}s`);
   return `reset after ${parts.join(" ")}`;
+}
+
+/**
+ * Parse a provider-reported retry window into ms: an ISO retryAfter timestamp,
+ * or "Try again in 31m/45s/2h" (incl. compound "6h 37m") embedded in the error
+ * text. Returns 0 if none. Shared by account-level checkFallbackError and
+ * combo-level recordComboFailure so both layers honor upstream retry windows.
+ */
+export function parseUpstreamRetryMs(errorText, retryAfter, now = Date.now()) {
+  if (retryAfter) {
+    const ts = new Date(retryAfter).getTime();
+    if (Number.isFinite(ts) && ts > now) return ts - now;
+  }
+  if (typeof errorText === "string") {
+    // Supports compound windows like "Try again in 6h 37m" (sums all parts).
+    const re = /(\d+(?:\.\d+)?)\s*(h(?:ours?)?|m(?:in(?:utes?)?)?|s(?:ec(?:onds?)?)?)/gi;
+    // Anchor to a "try again in ..." clause so unrelated numbers don't match.
+    const clause = errorText.match(/try again in[^.!\n]{0,60}/i);
+    const scope = clause ? clause[0] : null;
+    if (scope) {
+      let total = 0, m;
+      re.lastIndex = 0;
+      while ((m = re.exec(scope)) !== null) {
+        const n = Number.parseFloat(m[1]);
+        const unit = m[2].toLowerCase();
+        if (unit.startsWith("h")) total += n * 3600 * 1000;
+        else if (unit.startsWith("m")) total += n * 60 * 1000;
+        else total += n * 1000;
+      }
+      if (total > 0) return total;
+    }
+  }
+  return 0;
 }
 
 /** Prefix for model lock flat fields on connection record */

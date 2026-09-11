@@ -2,7 +2,7 @@
  * Shared combo (model combo) handling with fallback support
  */
 
-import { checkFallbackError, formatRetryAfter } from "./accountFallback.js";
+import { checkFallbackError, formatRetryAfter, parseUpstreamRetryMs } from "./accountFallback.js";
 import { unavailableResponse } from "../utils/error.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { extractTextContent } from "../translator/formats/gemini.js";
@@ -108,28 +108,6 @@ const COMBO_TRANSIENT_STATUSES = new Set([502, 503, 504]);
 
 export function getComboHealthKey(comboName, model) {
   return `${comboName || "__default__"}::${model}`;
-}
-
-/**
- * Parse a provider-reported retry window into ms: an ISO retryAfter timestamp,
- * or "Try again in 31m/45s/2h" embedded in the error text. Returns 0 if none.
- */
-function parseUpstreamRetryMs(errorText, retryAfter, now = Date.now()) {
-  if (retryAfter) {
-    const ts = new Date(retryAfter).getTime();
-    if (Number.isFinite(ts) && ts > now) return ts - now;
-  }
-  if (typeof errorText === "string") {
-    const m = errorText.match(/try again in\s+(\d+(?:\.\d+)?)\s*(h(?:ours?)?|m(?:in(?:utes?)?)?|s(?:ec(?:onds?)?)?)/i);
-    if (m) {
-      const n = Number.parseFloat(m[1]);
-      const unit = m[2].toLowerCase();
-      if (unit.startsWith("h")) return n * 3600 * 1000;
-      if (unit.startsWith("m")) return n * 60 * 1000;
-      return n * 1000;
-    }
-  }
-  return 0;
 }
 
 export function isComboModelCooling(comboName, model, now = Date.now()) {
