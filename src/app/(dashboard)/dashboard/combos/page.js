@@ -53,6 +53,7 @@ export default function CombosPage() {
   const [comboStrategies, setComboStrategies] = useState({});
   const [capacityAdapter, setCapacityAdapter] = useState(EMPTY_CAPACITY_ADAPTER);
   const [cooling, setCooling] = useState([]);
+  const [nowTick, setNowTick] = useState(() => Date.now());
   const { getCaps } = useModelCaps();
   const [confirmState, setConfirmState] = useState(null);
   const { copied, copy } = useCopyToClipboard();
@@ -60,6 +61,13 @@ export default function CombosPage() {
   useEffect(() => {
     fetchData();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Tick every second so cooling countdowns decrement live; expired ones drop off.
+  useEffect(() => {
+    if (cooling.length === 0) return;
+    const t = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [cooling.length]);
 
   const fetchData = async () => {
     try {
@@ -219,22 +227,25 @@ export default function CombosPage() {
       </div>
 
       {/* Cooling banner */}
-      {cooling.length > 0 && (
+      {(() => {
+        const active = cooling.filter((c) => (c.unavailableUntil || 0) > nowTick);
+        return active.length > 0 && (
         <Card padding="sm" className="border-amber-500/30 bg-amber-500/5">
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center gap-2 text-sm font-medium text-text-main">
               <span className="material-symbols-outlined text-[18px] text-amber-500">schedule</span>
-              {cooling.length} model{cooling.length > 1 ? "s" : ""} cooling — skipped on next requests
+              {active.length} model{active.length > 1 ? "s" : ""} cooling — skipped on next requests
             </div>
-            {cooling.map((c) => (
+            {active.map((c) => (
               <div key={`${c.combo}::${c.model}`} className="text-xs text-text-muted font-mono">
                 {c.combo} / {c.model} · fails {c.failCount} · status {c.lastStatus ?? "?"} ·
-                {" "}resumes in {Math.ceil(c.remainingMs / 1000)}s
+                {" "}resumes in {Math.max(0, Math.ceil(((c.unavailableUntil || 0) - nowTick) / 1000))}s
               </div>
             ))}
           </div>
         </Card>
-      )}
+        );
+      })()}
 
       {/* Combos List */}
       {combos.length === 0 ? (
