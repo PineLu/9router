@@ -131,12 +131,14 @@ function groupDataByKey(data, keyField) {
     if (!groups[gk]) {
       groups[gk] = {
         groupKey: gk,
-        summary: { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, totalTokens: 0, cost: 0, inputCost: 0, cachedCost: 0, outputCost: 0, lastUsed: null, pending: 0 },
+        summary: { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, totalTokens: 0, cost: 0, inputCost: 0, cachedCost: 0, outputCost: 0, healthSuccess: 0, healthFailed: 0, lastUsed: null, pending: 0 },
         items: [],
       };
     }
     const s = groups[gk].summary;
     s.requests += item.requests || 0;
+    s.healthSuccess += item.healthSuccess || 0;
+    s.healthFailed += item.healthFailed || 0;
     s.promptTokens += item.promptTokens || 0;
     s.completionTokens += item.completionTokens || 0;
     s.cachedTokens += item.cachedTokens || 0;
@@ -158,6 +160,8 @@ const MODEL_COLUMNS = [
   { field: "rawModel", label: "Model" },
   { field: "provider", label: "Provider" },
   { field: "requests", label: "Requests", align: "right" },
+  { field: "healthSuccess", label: "成功", align: "right" },
+  { field: "healthFailed", label: "失败", align: "right" },
   { field: "lastUsed", label: "Last Used", align: "right" },
 ];
 
@@ -166,6 +170,8 @@ const ACCOUNT_COLUMNS = [
   { field: "provider", label: "Provider" },
   { field: "accountName", label: "Account" },
   { field: "requests", label: "Requests", align: "right" },
+  { field: "healthSuccess", label: "成功", align: "right" },
+  { field: "healthFailed", label: "失败", align: "right" },
   { field: "lastUsed", label: "Last Used", align: "right" },
 ];
 
@@ -331,6 +337,8 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
             <>
               <td className="px-6 py-3 text-text-muted">—</td>
               <td className="px-6 py-3 text-right">{fmt(group.summary.requests)}</td>
+              <td className="px-6 py-3 text-right text-green-600">{fmt(group.summary.healthSuccess)}</td>
+              <td className="px-6 py-3 text-right text-red-600">{fmt(group.summary.healthFailed)}</td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(group.summary.lastUsed)}</td>
             </>
           ),
@@ -339,6 +347,8 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
               <td className={`px-6 py-3 font-medium transition-colors ${item.pending > 0 ? "text-primary" : ""}`}>{item.rawModel}</td>
               <td className="px-6 py-3"><Badge variant={item.pending > 0 ? "primary" : "neutral"} size="sm">{item.provider}</Badge></td>
               <td className="px-6 py-3 text-right">{fmt(item.requests)}</td>
+              <td className="px-6 py-3 text-right text-green-600">{fmt(item.healthSuccess || 0)}</td>
+              <td className="px-6 py-3 text-right text-red-600">{fmt(item.healthFailed || 0)}</td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(item.lastUsed)}</td>
             </>
           ),
@@ -365,6 +375,8 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
               <td className="px-6 py-3 text-text-muted">—</td>
               <td className="px-6 py-3 text-text-muted">—</td>
               <td className="px-6 py-3 text-right">{fmt(group.summary.requests)}</td>
+              <td className="px-6 py-3 text-right text-green-600">{fmt(group.summary.healthSuccess)}</td>
+              <td className="px-6 py-3 text-right text-red-600">{fmt(group.summary.healthFailed)}</td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(group.summary.lastUsed)}</td>
             </>
           ),
@@ -374,6 +386,8 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
               <td className={`px-6 py-3 font-medium transition-colors ${item.pending > 0 ? "text-primary" : ""}`}>{item.rawModel}</td>
               <td className="px-6 py-3"><Badge variant={item.pending > 0 ? "primary" : "neutral"} size="sm">{item.provider}</Badge></td>
               <td className="px-6 py-3 text-right">{fmt(item.requests)}</td>
+              <td className="px-6 py-3 text-right text-green-600">{fmt(item.healthSuccess || 0)}</td>
+              <td className="px-6 py-3 text-right text-red-600">{fmt(item.healthFailed || 0)}</td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(item.lastUsed)}</td>
             </>
           ),

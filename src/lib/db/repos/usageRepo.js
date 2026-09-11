@@ -678,6 +678,47 @@ export async function getUsageStats(period = "all") {
     stats.health = { success: 0, failed: 0, total: 0, successRate: 0 };
   }
 
+  // Per-row health for the model/account tables (same window).
+  // apiKey/endpoint views have no matching columns in requestDetails, so they stay without health.
+  try {
+    let hc = null;
+    if (period === "today") {
+      const sod = new Date(); sod.setHours(0, 0, 0, 0);
+      hc = sod.toISOString();
+    } else if (period !== "all") {
+      const days = { "24h": 1, "7d": 7, "30d": 30, "60d": 60 }[period];
+      hc = new Date(Date.now() - (days || 7) * 24 * 3600 * 1000).toISOString();
+    }
+    const hRows = hc
+      ? db.all(`SELECT provider, model, connectionId, status, COUNT(*) AS c FROM requestDetails WHERE timestamp >= ? GROUP BY provider, model, connectionId, status`, [hc])
+      : db.all(`SELECT provider, model, connectionId, status, COUNT(*) AS c FROM requestDetails GROUP BY provider, model, connectionId, status`);
+    const byModelHealth = new Map();
+    const byConnHealth = new Map();
+    for (const r of hRows) {
+      const disp = providerNodeNameMap[r.provider] || r.provider;
+      const k1 = `${r.model}|${disp}`;
+      const e1 = byModelHealth.get(k1) || { success: 0, failed: 0 };
+      if (r.status === "success") e1.success += r.c; else e1.failed += r.c;
+      byModelHealth.set(k1, e1);
+      if (r.connectionId) {
+        const k2 = `${r.model}|${r.connectionId}`;
+        const e2 = byConnHealth.get(k2) || { success: 0, failed: 0 };
+        if (r.status === "success") e2.success += r.c; else e2.failed += r.c;
+        byConnHealth.set(k2, e2);
+      }
+    }
+    for (const e of Object.values(stats.byModel || {})) {
+      const h = byModelHealth.get(`${e.rawModel}|${e.provider}`) || { success: 0, failed: 0 };
+      e.healthSuccess = h.success; e.healthFailed = h.failed;
+    }
+    for (const e of Object.values(stats.byAccount || {})) {
+      const h = byConnHealth.get(`${e.rawModel}|${e.connectionId}`) || { success: 0, failed: 0 };
+      e.healthSuccess = h.success; e.healthFailed = h.failed;
+    }
+  } catch {
+    // leave health fields unset; UI falls back to 0
+  }
+
   stats.totalRequests = Object.values(stats.byProvider).reduce((sum, p) => sum + (p.requests || 0), 0);
   return stats;
 }
