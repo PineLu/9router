@@ -379,7 +379,7 @@ export default function RequestDetailsTab() {
                         {detail.status}
                       </span>
                     </td>
-                    <td className="max-w-[220px] p-4 text-xs font-mono text-text-muted" title={detail.errorMessage || ""}>
+                    <td className="p-4 text-xs font-mono text-text-muted w-[90px] max-w-[90px]" title={detail.errorMessage || ""}>
                       {detail.errorMessage ? (
                         <span className="block truncate text-red-600">{detail.errorMessage}</span>
                       ) : <span>—</span>}
