@@ -654,6 +654,30 @@ export async function getUsageStats(period = "all") {
     }
   }
 
+  // Health breakdown (success / failed) from per-request details, same period window.
+  // Note: requestDetails retains ~1000 latest rows, so long periods reflect the retained window.
+  try {
+    let healthCutoff = null;
+    if (period === "today") {
+      const sod = new Date(); sod.setHours(0, 0, 0, 0);
+      healthCutoff = sod.toISOString();
+    } else if (period !== "all") {
+      const days = { "24h": 1, "7d": 7, "30d": 30, "60d": 60 }[period];
+      healthCutoff = new Date(Date.now() - (days || 7) * 24 * 3600 * 1000).toISOString();
+    }
+    const rows = healthCutoff
+      ? db.all(`SELECT status, COUNT(*) AS c FROM requestDetails WHERE timestamp >= ? GROUP BY status`, [healthCutoff])
+      : db.all(`SELECT status, COUNT(*) AS c FROM requestDetails GROUP BY status`);
+    let ok = 0, fail = 0;
+    for (const r of rows) {
+      if (r.status === "success") ok += r.c;
+      else fail += r.c;
+    }
+    stats.health = { success: ok, failed: fail, total: ok + fail, successRate: ok + fail > 0 ? Math.round(ok / (ok + fail) * 1000) / 10 : 0 };
+  } catch {
+    stats.health = { success: 0, failed: 0, total: 0, successRate: 0 };
+  }
+
   stats.totalRequests = Object.values(stats.byProvider).reduce((sum, p) => sum + (p.requests || 0), 0);
   return stats;
 }

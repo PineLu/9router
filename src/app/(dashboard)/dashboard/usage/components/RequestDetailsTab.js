@@ -99,6 +99,31 @@ function getInputTokens(tokens) {
   return prompt < cache ? cache : prompt;
 }
 
+function toLocalInputValue(d) {
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function startOfToday() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return toLocalInputValue(d);
+}
+
+const DATE_PRESETS = [
+  { key: "today", label: "今天" },
+  { key: "24h", label: "24小时" },
+  { key: "7d", label: "7天" },
+  { key: "30d", label: "30天" },
+];
+
+function presetRange(key) {
+  const now = new Date();
+  if (key === "today") return { startDate: startOfToday(), endDate: "" };
+  const hours = { "24h": 24, "7d": 7 * 24, "30d": 30 * 24 }[key] || 24;
+  return { startDate: toLocalInputValue(new Date(now.getTime() - hours * 3600 * 1000)), endDate: "" };
+}
+
 export default function RequestDetailsTab() {
   const [details, setDetails] = useState([]);
   const [pagination, setPagination] = useState({
@@ -112,11 +137,22 @@ export default function RequestDetailsTab() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [providers, setProviders] = useState([]);
   const [providerNameCache, setProviderNameCache] = useState(null);
-  const [filters, setFilters] = useState({
+  const [filters, setFilters] = useState(() => ({
     provider: "",
-    startDate: "",
-    endDate: ""
-  });
+    ...presetRange("today"),
+  }));
+  const [activePreset, setActivePreset] = useState("today");
+
+  const applyPreset = (key) => {
+    setFilters((prev) => ({ ...prev, ...presetRange(key) }));
+    setPagination((prev) => ({ ...prev, page: 1 }));
+    setActivePreset(key);
+  };
+
+  const updateFilters = (patch) => {
+    setFilters((prev) => ({ ...prev, ...patch }));
+    setActivePreset(null);
+  };
 
   const fetchProviders = useCallback(async () => {
     try {
@@ -176,19 +212,38 @@ export default function RequestDetailsTab() {
   };
 
   const handleClearFilters = () => {
-    setFilters({ provider: "", startDate: "", endDate: "" });
+    setFilters({ provider: "", ...presetRange("today") });
+    setPagination((prev) => ({ ...prev, page: 1 }));
+    setActivePreset("today");
   };
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
       <Card padding="md">
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          {DATE_PRESETS.map((p) => (
+            <button
+              key={p.key}
+              type="button"
+              onClick={() => applyPreset(p.key)}
+              className={cn(
+                "h-8 rounded-full border px-4 text-sm transition-colors",
+                activePreset === p.key
+                  ? "border-primary bg-primary/10 font-medium text-primary"
+                  : "border-black/10 text-text-muted hover:text-text-main dark:border-white/10"
+              )}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="flex min-w-0 flex-col gap-2">
             <label htmlFor="provider-filter" className="text-sm font-medium text-text-main">Provider</label>
             <select
               id="provider-filter"
               value={filters.provider}
-              onChange={(e) => setFilters({ ...filters, provider: e.target.value })}
+              onChange={(e) => updateFilters({ provider: e.target.value })}
               className={cn(
                 "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
                 "text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
@@ -211,7 +266,7 @@ export default function RequestDetailsTab() {
               id="start-date-filter"
               type="datetime-local"
               value={filters.startDate}
-              onChange={(e) => setFilters({ ...filters, startDate: e.target.value })}
+              onChange={(e) => updateFilters({ startDate: e.target.value })}
               className={cn(
                 "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
                 "w-full min-w-0 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20"
@@ -225,7 +280,7 @@ export default function RequestDetailsTab() {
               id="end-date-filter"
               type="datetime-local"
               value={filters.endDate}
-              onChange={(e) => setFilters({ ...filters, endDate: e.target.value })}
+              onChange={(e) => updateFilters({ endDate: e.target.value })}
               className={cn(
                 "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
                 "w-full min-w-0 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20"
