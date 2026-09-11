@@ -455,7 +455,14 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       // Combo-level failure memory: known-bad models are skipped on later requests.
       const comboCooldownMs = recordComboFailure(comboName, modelStr, result.status, errorText, retryAfter);
       if (comboCooldownMs > 0) {
-        log.info("COMBO", `Model ${modelStr} cooling for ${Math.round(comboCooldownMs / 1000)}s`, { status: result.status });
+        const extra = { status: result.status };
+        if (result.status === 429) {
+          // Debug aid: show what the retry-window parser saw, so a missed
+          // "Try again in Nm" (→ fallback 2min instead of Nm) is visible.
+          extra.retryAfter = retryAfter || null;
+          extra.errPreview = String(errorText || "").slice(0, 120);
+        }
+        log.info("COMBO", `Model ${modelStr} cooling for ${Math.round(comboCooldownMs / 1000)}s`, extra);
       }
 
       if (!shouldFallback) {
