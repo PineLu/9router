@@ -8,6 +8,8 @@ import { buildAbortedResponsesTerminalBytes } from "../../utils/responsesStreamH
 import { buildRequestDetail, extractRequestConfig, saveUsageStats, formatDoneLine } from "./requestDetail.js";
 import { saveRequestDetail } from "@/lib/usageDb.js";
 import { SSE_HEADERS_CORS as SSE_HEADERS } from "../../utils/sseConstants.js";
+import { isContentFilterFinish, isRefusalText } from "./contentFilter.js";
+import { recordComboFailure } from "../../services/combo.js";
 
 // Codex returns Responses API SSE → which client format to translate INTO, by request sourceFormat.
 // Gemini-family all map to ANTIGRAVITY decoder; unknown sources fall back to OPENAI.
@@ -109,17 +111,40 @@ export async function handleStreamingResponse({ providerResponse, provider, mode
 
 /**
  * Build onStreamComplete callback for streaming usage tracking.
+ * The returned callback receives (contentObj, usage, ttftAt, extra): `extra`
+ * carries the final finish/stop reason reported by the provider translators
+ * (state.finishReason in stream.js). A silent refusal (content_filter) records
+ * combo-level failure memory so the NEXT request in the same combo skips this
+ * model — the in-flight response itself cannot be rewritten mid-stream.
  */
-export function buildOnStreamComplete({ provider, model, connectionId, apiKey, requestStartTime, body, stream, finalBody, translatedBody, clientRawRequest, pxpipe, reqTag, log }) {
+export function buildOnStreamComplete({ provider, model, connectionId, apiKey, requestStartTime, body, stream, finalBody, translatedBody, clientRawRequest, pxpipe, reqTag, log, comboName = null }) {
   const streamDetailId = `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 
-  const onStreamComplete = (contentObj, usage, ttftAt) => {
+  const onStreamComplete = (contentObj, usage, ttftAt, extra = null) => {
     const latency = {
       ttft: ttftAt ? ttftAt - requestStartTime : Date.now() - requestStartTime,
       total: Date.now() - requestStartTime
     };
     const safeContent = contentObj?.content || "[Empty streaming response]";
     const safeThinking = contentObj?.thinking || null;
+
+    // Silent refusal detection (streaming): the turn is already on the wire,
+    // so we record combo failure memory + mark the detail row. The client
+    // gets what upstream sent; the NEXT combo request avoids this model.
+    // extra.finishReason is best (translator-reported); fall back to refusal
+    // text when a provider refuses with finish_reason=stop.
+    const finishReason = extra?.finishReason ?? null;
+    const filtered = isContentFilterFinish(finishReason)
+      || (!finishReason && isRefusalText(safeContent));
+    if (filtered && comboName) {
+      const hit = finishReason ? `finish=${finishReason}` : "refusal-text";
+      const cooldownMs = recordComboFailure(
+        comboName, `${provider}/${model}`, 403, `Content filtered (${hit})`
+      );
+      if (log?.line) log.line(reqTag, "🚫", `CONTENT_FILTER · ${provider}/${model} · cooling ${Math.round(cooldownMs / 1000)}s · ${hit}`);
+    } else if (filtered) {
+      if (log?.line) log.line(reqTag, "🚫", `CONTENT_FILTER · ${provider}/${model} (no combo → memory only)`);
+    }
 
     saveRequestDetail(buildRequestDetail({
       provider, model, connectionId,
@@ -128,9 +153,9 @@ export function buildOnStreamComplete({ provider, model, connectionId, apiKey, r
       request: extractRequestConfig(body, stream),
       providerRequest: finalBody || translatedBody || null,
       providerResponse: safeContent,
-      response: { content: safeContent, thinking: safeThinking, type: "streaming" },
+      response: { content: safeContent, thinking: safeThinking, type: "streaming", ...(finishReason ? { finish_reason: finishReason } : {}) },
       pxpipe,
-      status: "success"
+      status: filtered ? "error" : "success"
     }, { id: streamDetailId })).catch(err => {
       console.error("[RequestDetail] Failed to update streaming content:", err.message);
     });

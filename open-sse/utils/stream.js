@@ -78,6 +78,12 @@ export function createSSEStream(options = {}) {
   let streamDoneSent = false;  // track duplicate [DONE] across transform + flush
   let finalized = false;
 
+  // Passthrough mode: OpenAI-shape upstream chunks arrive here already
+  // translated (or native). Track the tail finish_reason so onStreamComplete
+  // can spot a silent content_filter refusal. translateResponse() translators
+  // record state.finishReason on the TRANSLATE path; this covers PASSTHROUGH.
+  let upstreamFinishReason = null;
+
   // Usage/logging tail, callable from transform() as well as flush(): a client that
   // closes right after the terminal event cancels the reader, and flush() never runs.
   const finalizeStream = () => {
@@ -102,7 +108,7 @@ export function createSSEStream(options = {}) {
       onStreamComplete({
         content: accumulatedContent,
         thinking: accumulatedThinking
-      }, finalUsage, ttftAt);
+      }, finalUsage, ttftAt, { finishReason: isPassthrough ? upstreamFinishReason : (state?.finishReason ?? null) });
     }
   };
 
@@ -140,6 +146,9 @@ export function createSSEStream(options = {}) {
           if (trimmed.startsWith("data:") && trimmed.slice(5).trim() !== "[DONE]") {
             try {
               const parsed = JSON.parse(trimmed.slice(5).trim());
+
+              const fr = parsed?.choices?.[0]?.finish_reason;
+              if (typeof fr === "string" && fr) upstreamFinishReason = fr;
 
               const idFixed = fixInvalidId(parsed);
 

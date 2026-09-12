@@ -1,5 +1,6 @@
 import { convertResponsesStreamToJson } from "../../transformer/streamToJsonConverter.js";
-import { createErrorResult } from "../../utils/error.js";
+import { createErrorResult, formatProviderError } from "../../utils/error.js";
+import { getContentFilterRefusal, extractRefusalPreview } from "./contentFilter.js";
 import { HTTP_STATUS } from "../../config/runtimeConfig.js";
 import { FORMATS } from "../../translator/formats.js";
 import { PROVIDERS } from "../../config/providers.js";
@@ -223,6 +224,19 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
         status: "success"
       }, { endpoint: clientRawRequest?.endpoint || null })).catch(() => {});
 
+      // Silent refusal in the Chat Completions SSE path (same as the JSON
+      // path in nonStreamingHandler.js): fail the turn for combo fallback.
+      const sseRefusal = getContentFilterRefusal(parsed);
+      if (sseRefusal) {
+        const preview = extractRefusalPreview(parsed);
+        const sseErrMsg = formatProviderError(
+          new Error(`Content filtered (${sseRefusal})${preview ? `: ${preview}` : ""}`),
+          provider, model, HTTP_STATUS.FORBIDDEN
+        );
+        appendLog({ status: `FAILED ${HTTP_STATUS.FORBIDDEN} content_filter` });
+        return createErrorResult(HTTP_STATUS.FORBIDDEN, sseErrMsg);
+      }
+
       // Client is Responses API → return as-is
       if (sourceFormat === FORMATS.OPENAI_RESPONSES) {
         return { success: true, response: new Response(JSON.stringify(jsonResponse), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };
@@ -339,6 +353,18 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
           delete choice.message.reasoning_content;
         }
       }
+    }
+
+    // (Same silent-refusal check as the Responses-API branch above.)
+    const stdRefusal = getContentFilterRefusal(parsed);
+    if (stdRefusal) {
+      const preview = extractRefusalPreview(parsed);
+      const stdErrMsg = formatProviderError(
+        new Error(`Content filtered (${stdRefusal})${preview ? `: ${preview}` : ""}`),
+        provider, model, HTTP_STATUS.FORBIDDEN
+      );
+      appendLog({ status: `FAILED ${HTTP_STATUS.FORBIDDEN} content_filter` });
+      return createErrorResult(HTTP_STATUS.FORBIDDEN, stdErrMsg);
     }
 
     // A Responses-format client (e.g. Codex) forced this provider to stream,

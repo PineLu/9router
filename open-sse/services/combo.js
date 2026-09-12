@@ -354,7 +354,9 @@ export function getComboModelsFromData(modelStr, combosData) {
  * @param {Object} options
  * @param {Object} options.body - Request body
  * @param {string[]} options.models - Array of model strings to try
- * @param {Function} options.handleSingleModel - Function to handle single model: (body, modelStr) => Promise<Response>
+ * @param {Function} options.handleSingleModel - Function to handle single model: (body, modelStr, comboCtx?) => Promise<Response>.
+ *   comboCtx carries { comboName, comboModel } so leaf streaming paths can
+ *   record failure memory when an HTTP-200 turn is silently content-filtered.
  * @param {Object} options.log - Logger object
  * @param {string} [options.comboName] - Name of the combo (for round-robin tracking)
  * @param {string} [options.comboStrategy] - Strategy: "fallback" or "round-robin"
@@ -397,8 +399,8 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
     log.info("COMBO", `Trying model ${i + 1}/${attemptModels.length}: ${modelStr}`);
 
     try {
-      const result = await handleSingleModel(body, modelStr);
-      
+      const result = await handleSingleModel(body, modelStr, { comboName, comboModel: modelStr });
+
       // Success (2xx) - return response
       if (result.ok) {
         log.info("COMBO", `Model ${modelStr} succeeded`);

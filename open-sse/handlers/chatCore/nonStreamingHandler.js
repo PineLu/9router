@@ -3,9 +3,10 @@ import { needsTranslation } from "../../translator/index.js";
 import { fromOpenAIFinish } from "../../translator/concerns/finishReason.js";
 import { ollamaBodyToOpenAI } from "../../translator/response/ollama-to-openai.js";
 import { addBufferToUsage, filterUsageForFormat } from "../../utils/usageTracking.js";
-import { createErrorResult } from "../../utils/error.js";
+import { createErrorResult, formatProviderError } from "../../utils/error.js";
 import { HTTP_STATUS } from "../../config/runtimeConfig.js";
 import { parseSSEToOpenAIResponse } from "./sseToJsonHandler.js";
+import { getContentFilterRefusal, extractRefusalPreview } from "./contentFilter.js";
 import { unwrapClineEnvelope } from "../../shared/clineEnvelope.js";
 import { buildRequestDetail, extractRequestConfig, extractUsageFromResponse, saveUsageStats, formatDoneLine } from "./requestDetail.js";
 import { appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
@@ -330,6 +331,34 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
   const translatedResponse = needsTranslation(targetFormat, sourceFormat)
     ? translateNonStreamingResponse(responseBody, targetFormat, sourceFormat, customToolNames)
     : responseBody;
+
+  // Silent refusal (HTTP 200 + finish_reason=content_filter / refusal text):
+  // the model declined the request, so fail the turn and let combo/account
+  // fallback try the next model instead of serving the apology as an answer.
+  // Checks the RAW upstream body (a provider-native gemini/claude body may
+  // carry SAFETY) and the translated body (an OpenAI-shaped content_filter).
+  const refusalReason = getContentFilterRefusal(responseBody, translatedResponse);
+  if (refusalReason) {
+    const preview = extractRefusalPreview(responseBody, translatedResponse);
+    const errMsg = formatProviderError(
+      new Error(`Content filtered (${refusalReason})${preview ? `: ${preview}` : ""}`),
+      provider, model, HTTP_STATUS.FORBIDDEN
+    );
+    appendLog({ status: `FAILED ${HTTP_STATUS.FORBIDDEN} content_filter` });
+    saveRequestDetail(buildRequestDetail({
+      provider, model, connectionId,
+      latency: { ttft: Date.now() - requestStartTime, total: Date.now() - requestStartTime },
+      tokens: usage || { prompt_tokens: 0, completion_tokens: 0 },
+      request: extractRequestConfig(body, stream),
+      providerRequest: finalBody || translatedBody || null,
+      providerResponse: responseBody || null,
+      response: { error: errMsg, status: HTTP_STATUS.FORBIDDEN, thinking: null },
+      pxpipe,
+      status: "error"
+    }, { endpoint: clientRawRequest?.endpoint || null })).catch(() => { });
+    reqLogger.logError(new Error(errMsg), finalBody || translatedBody);
+    return createErrorResult(HTTP_STATUS.FORBIDDEN, errMsg);
+  }
   const isClaudeMessageResponse = sourceFormat === FORMATS.CLAUDE && translatedResponse?.type === "message";
   // Responses-format translation produces a `object:"response"` body with no
   // `choices`; skip the Chat-Completions-specific post-processing below for it.
