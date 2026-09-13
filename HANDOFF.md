@@ -1,6 +1,6 @@
 # HANDOFF — 9Router 源码部署 + Combo 降级策略优化
 
-> 最后更新：2026-09-13（三处对齐：分支未提交状态、machine 实测 6C、发版统一走 compose；comboName/requestedModel + content_filter 共 9 文件改动仍未提交）
+> 最后更新：2026-09-13（分支干净，HEAD `6acab207`；comboName/requestedModel 9 文件已提交推送；.snap 废弃快照已删）
 > 仓库：`https://github.com/PineLu/9router.git`（fork 自 decolua/9router）
 > 本地源码：`/Users/qitmac001720/docker_workspace/9router/9router-src`
 > 交接人：松林 ↔ AI 助手
@@ -11,10 +11,9 @@
 
 本机 9Router（本地 AI 网关，podman 容器）曾用官方镜像 `decolua/9router:latest` 跑，combo 降级策略太简单：无失败记忆，404 模型每个请求都先撞一遍。现已 fork 源码自部署，扩展了失败记忆、仪表盘、明细来源字段。
 
-## 当前状态（2026-09-12 22:30 快照）
+## 当前状态（2026-09-13 快照，分支干净）
 
-- **源码已就位**：`~/docker_workspace/9router/9router-src`，分支 `feat/combo-health-fallback`，HEAD `20152044`（content_filter 降级）
-- **分支有 9 文件改动未提交**（2026-09-13 实测 `git status`：comboName/requestedModel 那 9 文件 M，见 MAINTENANCE §9 + 1 untracked snapshot；content_filter 降级已在 HEAD `20152044` 里。发版前需先提交推送未提交部分，见 MAINTENANCE §6）
+- **源码已就位**：`~/docker_workspace/9router/9router-src`，分支 `feat/combo-health-fallback`，HEAD `6acab207`（comboName/requestedModel 已提交推送）
 - **现役容器 `9router-local` 已 Up**（自建镜像 `localhost/9router:local`，20128，数据 bind mount `~/docker_workspace/9router/data`）
 - **数据层**：SQLite，**rollback journal 模式**（已从 WAL 切出，无 `-shm`，宿主机可直接查库不冲突）
 - **combo 降级策略已上线**：404/401/403 冷却 2min、429 按上游窗口锁、5xx 不记，全员冷却硬试
@@ -67,8 +66,7 @@
 cd ~/docker_workspace/9router/9router-src
 git branch --show-current   # 应为 feat/combo-health-fallback
 
-# 发版：先提交推送未提交改动，再 build → up（中断几秒）
-git commit -am "..." && git push
+# 发版：分支干净时直接 build → up（中断几秒）；有改动先 commit+push
 cd ~/docker_workspace/9router
 podman-compose build && podman-compose up -d
 ```

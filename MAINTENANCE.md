@@ -142,7 +142,7 @@ podman-compose up -d
 
 **落盘范围**：`requestDetails` 和 `usageHistory` 两表都加了这两列（`ALTER TABLE ADD COLUMN`，旧行为空，启动时 `syncSchemaFromTables` 会自动补列，无需手工迁移）。
 
-**改动的 9 个文件**（分支 feat/combo-health-fallback，2026-09-13 实测仍未提交，发版前先 commit+push）：
+**改动的 9 个文件**（分支 feat/combo-health-fallback，2026-09-13 已提交推送 `6acab207`，分支干净）：
 - `src/lib/db/schema.js`：两表定义加列
 - `src/lib/db/repos/requestDetailsRepo.js`：record 构建 + INSERT（9 列，含 comboName/requestedModel）
 - `src/lib/db/repos/usageRepo.js`：INSERT（14 列）
