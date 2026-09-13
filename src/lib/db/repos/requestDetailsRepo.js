@@ -106,6 +106,8 @@ async function flushToDatabase() {
             id: item.id,
             provider: item.provider || null,
             model: item.model || null,
+            requestedModel: item.requestedModel || null,
+            comboName: item.comboName || null,
             connectionId: item.connectionId || null,
             timestamp: item.timestamp,
             status: item.status || null,
@@ -119,8 +121,8 @@ async function flushToDatabase() {
           };
 
           db.run(
-            `INSERT INTO requestDetails(id, timestamp, provider, model, connectionId, status, data) VALUES(?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET timestamp = excluded.timestamp, provider = excluded.provider, model = excluded.model, connectionId = excluded.connectionId, status = excluded.status, data = excluded.data`,
-            [record.id, record.timestamp, record.provider, record.model, record.connectionId, record.status, stringifyJson(record)]
+            `INSERT INTO requestDetails(id, timestamp, provider, model, connectionId, comboName, requestedModel, status, data) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET timestamp = excluded.timestamp, provider = excluded.provider, model = excluded.model, connectionId = excluded.connectionId, comboName = excluded.comboName, requestedModel = excluded.requestedModel, status = excluded.status, data = excluded.data`,
+            [record.id, record.timestamp, record.provider, record.model, record.connectionId, record.comboName, record.requestedModel, record.status, stringifyJson(record)]
           );
         }
 

@@ -351,6 +351,7 @@ export default function RequestDetailsTab() {
               <tr className="border-b border-black/5 dark:border-white/5">
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Timestamp</th>
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Model</th>
+                <th className="text-left p-4 text-sm font-semibold text-text-main">Combo</th>
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Provider</th>
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Account</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Input Tokens</th>
@@ -390,6 +391,9 @@ export default function RequestDetailsTab() {
                     </td>
                     <td className="max-w-[200px] truncate p-4 font-mono text-sm text-text-main">
                       {detail.model}
+                    </td>
+                    <td className="max-w-[140px] truncate p-4 font-mono text-sm text-text-main">
+                      {detail.comboName || "—"}
                     </td>
                     <td className="max-w-[180px] truncate p-4 text-sm text-text-main">
                        <span className="font-medium">
@@ -483,6 +487,10 @@ export default function RequestDetailsTab() {
               <div>
                 <span className="text-text-muted">Model:</span>{" "}
                 <span className="text-text-main font-mono">{selectedDetail.model}</span>
+              </div>
+              <div>
+                <span className="text-text-muted">Combo:</span>{" "}
+                <span className="text-text-main font-mono">{selectedDetail.comboName || "—"}</span>
               </div>
               <div>
                 <span className="text-text-muted">Status:</span>{" "}
