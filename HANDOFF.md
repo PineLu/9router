@@ -31,6 +31,15 @@
 5. **compose 构建修复**：`docker-compose.yml` 补 `build.context=./9router-src`（此前 compose build 空跑返回成功）；镜像变了 `up -d` 会自动重建容器
 6. **data.sqlite 第 4 次损坏与恢复**：PATCH settings 后再次 malformed；`.recover` 重建 `/tmp/rebuilt_0914.sqlite` 灌回恢复，`requestDetails.db` 未受影响；损坏现场 `data.sqlite.corrupt-20260914-1330`
 7. **combo 排序调整（用户已确认）**：`glm-5.3-flash` 重排为 `[deepseek, step, z-ai]`（原 z-ai 首位 TTFT~13s，重排后其中断归零）；**`muse-spark-1.3` 用户明确要求不动**
+8. **DB 写入重试**（`396fac70`）：`requestDetailsRepo.flushToDatabase` 遇 `SQLITE_BUSY`/`database is locked`/`disk I/O error` 退避重试 4 次（50/100/200/400ms），其余错误不重试。此前批量写失败即整批丢弃（对应上游 9router#3488 的"usage 行静默丢失"）
+9. **上游超时显式固化**（`396fac70`）：compose 写死 `STREAM_FIRST_CHUNK_TIMEOUT_MS=200000` / `STREAM_STALL_TIMEOUT_MS=360000` / `FETCH_CONNECT_TIMEOUT_MS=60000`（与代码默认一致，纯为可调性；改值重启即可，无需重建）
+
+### 上游 issue 对照（2026-09-14 查证）
+
+- **#3488**（open）：`DISCONNECT: ResponseAborted` 导致 usage 行静默丢失，作者日志 `⚡ DISCONNECT: ResponseAborted · opencode/hy3-free · 2255ms` 与本库中断行同源；作者结论"agentic CLI 客户端激进取消流"。**本库已用 `detailGuard` 修掉丢失问题**，且新增写入重试
+- **#1692**（open）：投诉 `FETCH_CONNECT_TIMEOUT_MS=20s` / `STREAM_STALL_TIMEOUT_MS=30s` 过短——**本 fork 已是 60s/360s，且支持环境变量覆盖，不受影响**
+- **#1393**（closed）：Codex 断连，靠 `CODEX_INITIAL_RESPONSE_TIMEOUT_MS` 修；该变量在本 fork 已不存在，补丁早已并入
+- **结论**：9router 侧超时类隐患上游已修净；本库 142 条中断中 76 条 <9s，不可能由任何超时（最短 60s）触发 → 病根在客户端主动取消，非网关
 
 ### 中断排查结论（2026-09-14，未完全闭环）
 
