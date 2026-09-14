@@ -123,6 +123,11 @@ sqlite3 ~/docker_workspace/9router/data/db/data.sqlite \
 - **构建**：`next build` 吃内存，machine 已扩到 8G 无压力。builder 镜像有 cache，重 build 秒过
 - **单测**：`npx vitest run tests/unit/combo-health-fallback.test.js` 通过
 - **`combo-autoswitch.test.js` 有 2 例预存失败**（与本次改动无关，别追）
+- **模型禁用（disabledModels）**：按 provider alias 存 `kv(scope='disabledModels')`，经 `POST/DELETE /api/models/disabled` 维护，只隐藏不删配置。2026-09-14 清理了 `occline`（=`openai-compatible-chat-4f2e6269`，github+google 两账号，上游 445 个模型）→ **只留 `z-ai/glm-5.3-flash`，禁掉 444 个**。恢复单个：`DELETE /api/models/disabled?providerAlias=occline&id=<模型ID>`。注意该 provider 现无备用模型，glm-5.3-flash 遇 429（当日免费额度耗尽）即整条不可用
+
+## 变更回滚记录
+
+- **2026-09-14 `b3549377`**：`client disconnected` 中断标记（`streamDetailGuard` / `detailGuard` / `streamHandler` 改动）**已全部回滚，与 master 一致**。原因：无法区分"真客户端 abort"与"下游 teardown / SDK 提前关闭"，把正常请求误报成中断，仪表盘数据不可信。**保留** compose 的三个上游超时环境变量、combo 逻辑、仪表盘改动、DB 写入重试。历史 error 行未清理。
 
 ## 待办
 
