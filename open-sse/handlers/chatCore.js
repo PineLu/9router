@@ -312,37 +312,9 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   const msgCount = translatedBody.messages?.length || translatedBody.input?.length || translatedBody.contents?.length || translatedBody.request?.contents?.length || 0;
   log?.debug?.("REQUEST", `${provider.toUpperCase()} | ${model} | ${msgCount} msgs`);
 
-  // Guards the streaming detail row: onStreamComplete marks done on success;
-  // a client disconnect finalizes the placeholder instead of leaving a
-  // forever-"in progress" row (0 tokens, "[Streaming in progress...]").
-  const streamDetailGuard = { id: null, done: false };
-
   const streamController = createStreamController({
     onDisconnect: (reason) => {
       trackPendingRequest(model, provider, connectionId, false);
-      if (streamDetailGuard.id && !streamDetailGuard.done) {
-        streamDetailGuard.done = true;
-        const dur = Date.now() - requestStartTime;
-        saveRequestDetail(buildRequestDetail({
-          provider, model, connectionId,
-          comboName: comboName || null,
-          requestedModel: body?.model || null,
-          latency: { ttft: 0, total: dur },
-          tokens: { prompt_tokens: 0, completion_tokens: 0 },
-          request: extractRequestConfig(body, stream),
-          providerRequest: translatedBody || null,
-          providerResponse: null,
-          response: {
-            content: "[Stream interrupted — partial response not captured]",
-            error: `client disconnected after ${dur}ms (${reason?.reason || reason || "unknown reason"})`,
-            type: "streaming",
-            interrupted: true
-          },
-          pxpipe: pxpipeSummary || undefined,
-          status: "error"
-        }, { id: streamDetailGuard.id })).catch(() => {});
-        if (log?.line) log.line(reqTag, "⚠", `STREAM INTERRUPTED · ${provider}/${model} · client disconnected after ${dur}ms`);
-      }
       if (onDisconnect) onDisconnect(reason);
     },
     onError: () => trackPendingRequest(model, provider, connectionId, false),
@@ -524,7 +496,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   }
 
   // Streaming response
-  const { onStreamComplete, streamDetailId } = buildOnStreamComplete({ ...sharedCtx, comboName, detailGuard: streamDetailGuard });
+  const { onStreamComplete, streamDetailId } = buildOnStreamComplete({ ...sharedCtx, comboName });
   return handleStreamingResponse({ ...sharedCtx, providerResponse, sourceFormat, targetFormat: providerResponseFormat, userAgent, reqLogger, toolNameMap, customToolNames, streamController, onStreamComplete, streamDetailId, credentials });
 }
 
