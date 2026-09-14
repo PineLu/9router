@@ -96,44 +96,62 @@ async function flushToDatabase() {
       const db = await getAdapter();
       const config = await getObservabilityConfig();
 
-      db.transaction(() => {
-        for (const item of items) {
-          if (!item.id) item.id = generateDetailId(item.model);
-          if (!item.timestamp) item.timestamp = new Date().toISOString();
-          if (item.request?.headers) item.request.headers = sanitizeHeaders(item.request.headers);
+      // Retry on SQLITE_BUSY / lock contention: without this a transient lock
+      // drops the whole drained batch silently (usage rows + detail rows lost,
+      // and usageHistory IDs skip — see 9router#3488). Back off and retry.
+      const BUSY_RETRIES = 4;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          db.transaction(() => {
+            for (const item of items) {
+              if (!item.id) item.id = generateDetailId(item.model);
+              if (!item.timestamp) item.timestamp = new Date().toISOString();
+              if (item.request?.headers) item.request.headers = sanitizeHeaders(item.request.headers);
 
-          const record = {
-            id: item.id,
-            provider: item.provider || null,
-            model: item.model || null,
-            requestedModel: item.requestedModel || null,
-            comboName: item.comboName || null,
-            connectionId: item.connectionId || null,
-            timestamp: item.timestamp,
-            status: item.status || null,
-            latency: item.latency || {},
-            tokens: item.tokens || {},
-            request: truncateField(item.request, config.maxJsonSize),
-            providerRequest: truncateField(item.providerRequest, config.maxJsonSize),
-            providerResponse: truncateField(item.providerResponse, config.maxJsonSize),
-            response: truncateField(item.response, config.maxJsonSize),
-            pxpipe: item.pxpipe || undefined,
-          };
+              const record = {
+                id: item.id,
+                provider: item.provider || null,
+                model: item.model || null,
+                requestedModel: item.requestedModel || null,
+                comboName: item.comboName || null,
+                connectionId: item.connectionId || null,
+                timestamp: item.timestamp,
+                status: item.status || null,
+                latency: item.latency || {},
+                tokens: item.tokens || {},
+                request: truncateField(item.request, config.maxJsonSize),
+                providerRequest: truncateField(item.providerRequest, config.maxJsonSize),
+                providerResponse: truncateField(item.providerResponse, config.maxJsonSize),
+                response: truncateField(item.response, config.maxJsonSize),
+                pxpipe: item.pxpipe || undefined,
+              };
 
-          db.run(
-            `INSERT INTO requestDetails(id, timestamp, provider, model, connectionId, comboName, requestedModel, status, data) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET timestamp = excluded.timestamp, provider = excluded.provider, model = excluded.model, connectionId = excluded.connectionId, comboName = excluded.comboName, requestedModel = excluded.requestedModel, status = excluded.status, data = excluded.data`,
-            [record.id, record.timestamp, record.provider, record.model, record.connectionId, record.comboName, record.requestedModel, record.status, stringifyJson(record)]
-          );
+              db.run(
+                `INSERT INTO requestDetails(id, timestamp, provider, model, connectionId, comboName, requestedModel, status, data) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET timestamp = excluded.timestamp, provider = excluded.provider, model = excluded.model, connectionId = excluded.connectionId, comboName = excluded.comboName, requestedModel = excluded.requestedModel, status = excluded.status, data = excluded.data`,
+                [record.id, record.timestamp, record.provider, record.model, record.connectionId, record.comboName, record.requestedModel, record.status, stringifyJson(record)]
+              );
+            }
+
+            const cnt = db.get(`SELECT COUNT(*) as c FROM requestDetails`);
+            if (cnt && cnt.c > config.maxRecords) {
+              db.run(
+                `DELETE FROM requestDetails WHERE id IN (SELECT id FROM requestDetails ORDER BY timestamp ASC LIMIT ?)`,
+                [cnt.c - config.maxRecords]
+              );
+            }
+          });
+          break; // success
+        } catch (e) {
+          const msg = String(e?.message || e);
+          const transient = /SQLITE_BUSY|SQLITE_LOCKED|database is locked|disk I\/O error/i.test(msg);
+          if (!transient || attempt >= BUSY_RETRIES) {
+            console.error(`[requestDetailsRepo] Batch write failed (attempt ${attempt + 1}/${BUSY_RETRIES + 1}):`, e);
+            break;
+          }
+          await new Promise((r) => setTimeout(r, 50 * 2 ** attempt));
+          console.warn(`[requestDetailsRepo] Transient DB error, retrying (${attempt + 1}/${BUSY_RETRIES}): ${msg}`);
         }
-
-        const cnt = db.get(`SELECT COUNT(*) as c FROM requestDetails`);
-        if (cnt && cnt.c > config.maxRecords) {
-          db.run(
-            `DELETE FROM requestDetails WHERE id IN (SELECT id FROM requestDetails ORDER BY timestamp ASC LIMIT ?)`,
-            [cnt.c - config.maxRecords]
-          );
-        }
-      });
+      }
     }
   } catch (e) {
     console.error("[requestDetailsRepo] Batch write failed:", e);
