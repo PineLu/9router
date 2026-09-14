@@ -119,10 +119,16 @@ export async function handleStreamingResponse({ providerResponse, provider, mode
  * combo-level failure memory so the NEXT request in the same combo skips this
  * model — the in-flight response itself cannot be rewritten mid-stream.
  */
-export function buildOnStreamComplete({ provider, model, connectionId, apiKey, requestStartTime, body, stream, finalBody, translatedBody, clientRawRequest, pxpipe, reqTag, log, comboName = null }) {
+export function buildOnStreamComplete({ provider, model, connectionId, apiKey, requestStartTime, body, stream, finalBody, translatedBody, clientRawRequest, pxpipe, reqTag, log, comboName = null, detailGuard = null }) {
   const streamDetailId = `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+  // Link the placeholder row to its completion: a client disconnect finalizes
+  // the row (guard.done=true) so the late onStreamComplete must not overwrite
+  // the interrupted mark with a fake "success".
+  if (detailGuard) detailGuard.id = streamDetailId;
 
   const onStreamComplete = (contentObj, usage, ttftAt, extra = null) => {
+    if (detailGuard?.done) return;
+    if (detailGuard) detailGuard.done = true;
     const latency = {
       ttft: ttftAt ? ttftAt - requestStartTime : Date.now() - requestStartTime,
       total: Date.now() - requestStartTime

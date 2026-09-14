@@ -179,9 +179,8 @@ export default function CombosPage() {
     try {
       const updated = { ...comboStrategies };
       const next = { ...(updated[comboName] || {}), ...patch };
-      // Prune to keep settings clean: default fallback with no extras = no entry.
       if (!next.fallbackStrategy || next.fallbackStrategy === "fallback") {
-        delete updated[comboName];
+        updated[comboName] = { ...next, fallbackStrategy: "fallback" };
       } else {
         updated[comboName] = next;
       }

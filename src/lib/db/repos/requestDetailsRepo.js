@@ -167,6 +167,7 @@ export async function getRequestDetails(filter = {}) {
   const params = [];
 
   if (filter.provider) { conds.push("provider = ?"); params.push(filter.provider); }
+  if (filter.combo) { conds.push("comboName = ?"); params.push(filter.combo); }
   if (filter.model) { conds.push("model = ?"); params.push(filter.model); }
   if (filter.connectionId) { conds.push("connectionId = ?"); params.push(filter.connectionId); }
   if (filter.status) { conds.push("status = ?"); params.push(filter.status); }
@@ -199,6 +200,12 @@ export async function getDistinctProviders() {
   const db = await getAdapter();
   const rows = db.all(`SELECT DISTINCT provider FROM requestDetails WHERE provider IS NOT NULL ORDER BY provider ASC`);
   return rows.map((r) => r.provider);
+}
+
+export async function getDistinctCombos() {
+  const db = await getAdapter();
+  const rows = db.all(`SELECT DISTINCT comboName FROM requestDetails WHERE comboName IS NOT NULL AND comboName != '' ORDER BY comboName ASC`);
+  return rows.map((r) => r.comboName);
 }
 
 export async function getRequestDetailById(id) {

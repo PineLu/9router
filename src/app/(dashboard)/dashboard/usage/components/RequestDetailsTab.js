@@ -136,9 +136,11 @@ export default function RequestDetailsTab() {
   const [selectedDetail, setSelectedDetail] = useState(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [providers, setProviders] = useState([]);
+  const [combos, setCombos] = useState([]);
   const [providerNameCache, setProviderNameCache] = useState(null);
   const [filters, setFilters] = useState(() => ({
     provider: "",
+    combo: "",
     status: "",
     error: "",
     ...presetRange("today"),
@@ -162,6 +164,7 @@ export default function RequestDetailsTab() {
       const res = await fetch("/api/usage/providers");
       const data = await res.json();
       setProviders(data.providers || []);
+      setCombos(data.combos || []);
 
       const cache = await fetchProviderNames();
       setProviderNameCache(cache.providerNameCache);
@@ -178,6 +181,7 @@ export default function RequestDetailsTab() {
         pageSize: pagination.pageSize.toString()
       });
       if (filters.provider) params.append("provider", filters.provider);
+      if (filters.combo) params.append("combo", filters.combo);
       if (filters.status) params.append("status", filters.status);
       if (filters.error) params.append("error", filters.error);
       if (filters.startDate) params.append("startDate", filters.startDate);
@@ -206,6 +210,25 @@ export default function RequestDetailsTab() {
   const handleViewDetail = (detail) => {
     setSelectedDetail(detail);
     setIsDrawerOpen(true);
+    // The list rows carry redacted bodies ({redacted:true}); fetch the full
+    // stored detail for the drawer. List-computed fields (errorMessage,
+    // accountName) are kept so they don't disappear after the merge.
+    if (detail?.id) {
+      fetch(`/api/usage/request-details/${encodeURIComponent(detail.id)}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.detail) {
+            setSelectedDetail((prev) => ({
+              ...data.detail,
+              errorMessage: detail.errorMessage ?? data.detail.errorMessage,
+              accountName: detail.accountName ?? data.detail.accountName,
+            }));
+          }
+        })
+        .catch((error) => {
+          console.error("Failed to fetch full request detail:", error);
+        });
+    }
   };
 
   const handlePageChange = (newPage) => {
@@ -217,7 +240,7 @@ export default function RequestDetailsTab() {
   };
 
   const handleClearFilters = () => {
-    setFilters({ provider: "", status: "", error: "", ...presetRange("today") });
+    setFilters({ provider: "", combo: "", status: "", error: "", ...presetRange("today") });
     setErrorInput("");
     setPagination((prev) => ({ ...prev, page: 1 }));
     setActivePreset("today");
@@ -261,6 +284,28 @@ export default function RequestDetailsTab() {
               {providers.map((provider) => (
                 <option key={provider.id} value={provider.id}>
                   {provider.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex min-w-0 flex-col gap-2">
+            <label htmlFor="combo-filter" className="text-sm font-medium text-text-main">Combo</label>
+            <select
+              id="combo-filter"
+              value={filters.combo}
+              onChange={(e) => updateFilters({ combo: e.target.value })}
+              className={cn(
+                "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
+                "text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
+                "w-full min-w-0 cursor-pointer"
+              )}
+              style={{ colorScheme: 'auto' }}
+            >
+              <option value="">All Combos</option>
+              {combos.map((combo) => (
+                <option key={combo.id} value={combo.id}>
+                  {combo.name}
                 </option>
               ))}
             </select>
@@ -346,7 +391,7 @@ export default function RequestDetailsTab() {
 
       <Card padding="none">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[940px]">
+          <table className="w-full table-auto">
             <thead>
               <tr className="border-b border-black/5 dark:border-white/5">
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Timestamp</th>
@@ -367,7 +412,7 @@ export default function RequestDetailsTab() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="9" className="p-8 text-center text-text-muted">
+                  <td colSpan="13" className="p-8 text-center text-text-muted">
                     <div className="flex items-center justify-center gap-2">
                       <span className="material-symbols-outlined animate-spin text-[20px]">progress_activity</span>
                       Loading...
@@ -376,7 +421,7 @@ export default function RequestDetailsTab() {
                 </tr>
               ) : details.length === 0 ? (
                 <tr>
-                  <td colSpan="9" className="p-8 text-center text-text-muted">
+                  <td colSpan="13" className="p-8 text-center text-text-muted">
                     No request details found
                   </td>
                 </tr>
@@ -389,37 +434,34 @@ export default function RequestDetailsTab() {
                     <td className="whitespace-nowrap p-4 text-sm text-text-main">
                       {new Date(detail.timestamp).toLocaleString()}
                     </td>
-                    <td className="max-w-[200px] truncate p-4 font-mono text-sm text-text-main">
+                    <td className="max-w-[160px] truncate p-4 font-mono text-sm text-text-main">
                       {detail.model}
                     </td>
                     <td className="max-w-[140px] truncate p-4 font-mono text-sm text-text-main">
                       {detail.comboName || "—"}
                     </td>
-                    <td className="max-w-[180px] truncate p-4 text-sm text-text-main">
+                    <td className="max-w-[140px] truncate p-4 text-sm text-text-main">
                        <span className="font-medium">
                          {getProviderName(detail.provider, providerNameCache)}
                        </span>
                      </td>
-                    <td className="max-w-[140px] truncate p-4 text-sm text-text-muted" title={detail.connectionId || ""}>
+                    <td className="max-w-[120px] truncate p-4 text-sm text-text-muted" title={detail.connectionId || ""}>
                       {detail.accountName || "—"}
                     </td>
-                    <td className="p-4 text-sm text-text-main text-right font-mono">
+                    <td className="w-[100px] p-4 text-sm text-text-main text-right font-mono">
                       {getInputTokens(detail.tokens).toLocaleString()}
                     </td>
-                    <td className="p-4 text-sm text-text-main text-right font-mono">
+                    <td className="w-[80px] p-4 text-sm text-text-main text-right font-mono">
                       {getCachedTokens(detail.tokens) > 0 ? getCachedTokens(detail.tokens).toLocaleString() : "—"}
                     </td>
-                    <td className="p-4 text-sm text-text-main text-right font-mono">
+                    <td className="w-[80px] p-4 text-sm text-text-main text-right font-mono">
                       {getCacheCreationTokens(detail.tokens) > 0 ? getCacheCreationTokens(detail.tokens).toLocaleString() : "—"}
                     </td>
-                    <td className="p-4 text-sm text-text-main text-right font-mono">
+                    <td className="w-[100px] p-4 text-sm text-text-main text-right font-mono">
                       {detail.tokens?.completion_tokens?.toLocaleString() || 0}
                     </td>
-                    <td className="p-4 text-sm text-text-muted">
-                      <div className="flex flex-col gap-0.5">
-                        <div>TTFT: <span className="font-mono">{detail.latency?.ttft || 0}ms</span></div>
-                        <div>Total: <span className="font-mono">{detail.latency?.total || 0}ms</span></div>
-                      </div>
+                    <td className="whitespace-nowrap p-4 text-sm text-text-muted">
+                      TTFT <span className="font-mono">{detail.latency?.ttft || 0}ms</span> / Total <span className="font-mono">{detail.latency?.total || 0}ms</span>
                     </td>
                     <td className="whitespace-nowrap p-4 text-sm">
                       <span className={cn(

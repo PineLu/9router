@@ -40,6 +40,7 @@
   - `db/data.sqlite.corrupt-*`：损坏现场快照（两次），排查后可删
   - `backup_before_combo_field_20260912_205414/`：第一次修库前备份（注意该备份本身也是从损坏库拷的，仅作现场参考，**不能**当恢复源）
   - `/tmp/recovered_v2.sql` + `/tmp/clean_db.sqlite`：第二次 .recover 产物，已灌回线上库
+- 2026-09-14：PATCH /api/settings 写 comboStrategies 后 data.sqlite 再坏（malformed schema，`integrity_check` 报 btree 错误；第 4 次）。`.recover` 重建为 `/tmp/rebuilt_0914.sqlite`（integrity ok）后灌回恢复；`requestDetails.db` 未受影响。教训：该库写易坏，改 settings 优先走仪表盘/API，打完 PATCH 后立刻调 /api/usage/providers 验证；可疑时先 `PRAGMA integrity_check` 再写。
 
 ## 3. 请求链路（chat）
 
@@ -98,9 +99,11 @@ podman run --rm 9router:builder npx vitest run tests/unit/combo-*.test.js
 # 2. 提交推送
 git commit -am "..." && git push
 # 3. 重新构建并重启（中断几秒）
+#    前置：docker-compose.yml 的 9router 服务必须有 build 段
+#    （context: ./9router-src；没它 compose build 会空跑返回成功，2026-09-14 已踩坑补上）
 cd ~/docker_workspace/9router
 podman-compose build
-podman-compose up -d
+podman-compose up -d   # 镜像变了会自动删旧容器重建，无需手动 rm
 # 4. 验证：curl /v1/models + 从 new-api 容器内 wget http://9router:20128/v1/models（应连通）
 # 兜底：Hermes 有每 10 分钟的看门狗（9router-link-watchdog），别名丢了会自动重挂并通知
 ```
@@ -120,9 +123,12 @@ podman-compose up -d
 
 - 明细（Details）：Status 列 + Error 列（90px 固定宽，超长省略，悬停气泡看全文；成功显示 —）+ Account 列（connectionId 解析成名/邮箱，悬停看原 ID；无账号的显示 —）、失败行详情弹窗的红色 Error 原因（接口透出一句话摘要，原文仍脱敏）。
 - 明细筛选：今天 / 24小时 / 7天 / 30天快捷（默认今天），手动改日期后高亮取消；Status 下拉（全部/成功/失败）；Error contains 关键字搜索（回车或失焦生效，后端 `data LIKE` 全字段匹配）。
+- 明细筛选加 Combo 下拉（2026-09-14 新增；选项由 `getDistinctCombos()` 从 `requestDetails.comboName` 去重，随 `/api/usage/providers` 返回，后端等值过滤）。
+- usage 页全宽（2026-09-14）：`DashboardLayout` 按路径豁免 `max-w-7xl`，只放开 `/dashboard/usage`（Overview/Details 一起变宽，其余页不动）；表格另去 `min-w`、Latency 压单行。
 - 概览（Overview）：Health 卡（成功率 + 成功/失败/总数，随周期切换；下方小字"近 N 条内统计"，hover 说明保留窗口）；按模型/按账号表有成功/失败/健康度（=成功/总数）列，可排序。密钥/端点视图库里无对应字段，未加。
 - Combos 页：顶部琥珀色冷却横条（有冷却才出现），显示冷却中模型 + 失败次数 + 上游状态码 + 恢复倒计时；数据来自新增接口 `GET /api/combos/health`（`getComboHealthSnapshot()` 快照内存 Map，不动降级逻辑）。
-- 数据源：`requestDetails` 表（每请求一行，保留窗口由 observabilityMaxRecords 控制，线上实际 1000 条，长周期健康度只覆盖保留窗口）；原始请求/响应体也在库里但接口打码，要看原文直查库。
+- 数据源：`requestDetails` 表（每请求一行，保留窗口由 observabilityMaxRecords 控制，线上实际 1000 条，长周期健康度只覆盖保留窗口）；列表接口打码，点 Detail 抽屉调新增 `GET /api/usage/request-details/[id]` 拿原文（同 dashboard 鉴权）。
+- 流中断行（2026-09-14 新增）：客户端断连时回填占位行（status=error，response 标 `interrupted: true` + `client disconnected after Xms`，日志 `STREAM INTERRUPTED`），不再留 0 token 烂尾行；正常结束的 onStreamComplete 靠 `detailGuard` 互斥，先断连后到的完成回调直接丢弃。
 - 429 冷却日志含解析输入（`retryAfter` + `errPreview` 前 120 字）：`cooling for 120s` 配空 errPreview = `clone().json()` 断了；errPreview 有文案但还是 120s = 正则对不上上游文案。
 - 401 熔断已存在（`markAccountUnavailable` 锁 `modelLock_${model}` + `testStatus=unavailable`，providers 页标红），不需另做；Cline `Unauthorized: re-authenticate` = refreshToken 也废了，只能手动去 providers 页重绑。
 - 429 双层冷却统一策略（2026-09-11 修）：账号层之前只指数退避（秒级），Cline 小时级窗口每 32 秒撞一次墙；现账号层/ combo 层都走 `parseUpstreamRetryMs`（accountFallback.js 导出，支持复合 `6h 37m`），有窗口按窗口封顶 30min，无窗口才指数退避。

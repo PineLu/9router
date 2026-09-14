@@ -32,7 +32,7 @@ function extractErrorMessage(d) {
 
 /**
  * GET /api/usage/request-details
- * Query parameters: page, pageSize (1-100), provider, model, connectionId, status, error, startDate, endDate
+ * Query parameters: page, pageSize (1-100), provider, combo, model, connectionId, status, error, startDate, endDate
  */
 export async function GET(request) {
   try {
@@ -43,6 +43,7 @@ export async function GET(request) {
     const pageSizeRaw = parseInt(searchParams.get("pageSize"));
     const pageSize = Number.isNaN(pageSizeRaw) ? 20 : pageSizeRaw;
     const provider = searchParams.get("provider");
+    const combo = searchParams.get("combo");
     const model = searchParams.get("model");
     const connectionId = searchParams.get("connectionId");
     const status = searchParams.get("status");
@@ -70,6 +71,7 @@ export async function GET(request) {
     };
     
     if (provider) filter.provider = provider;
+    if (combo) filter.combo = combo;
     if (model) filter.model = model;
     if (connectionId) filter.connectionId = connectionId;
     if (status) filter.status = status;
