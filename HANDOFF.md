@@ -11,9 +11,9 @@
 
 本机 9Router（本地 AI 网关，podman 容器）曾用官方镜像 `decolua/9router:latest` 跑，combo 降级策略太简单：无失败记忆，404 模型每个请求都先撞一遍。现已 fork 源码自部署，扩展了失败记忆、仪表盘、明细来源字段。
 
-## 当前状态（2026-09-13 快照，分支干净）
+## 当前状态（2026-09-14 更新，HEAD `4a86ad06` 已推送）
 
-- **源码已就位**：`~/docker_workspace/9router/9router-src`，分支 `feat/combo-health-fallback`，HEAD `6acab207`（comboName/requestedModel 已提交推送）
+- **源码已就位**：`~/docker_workspace/9router/9router-src`，分支 `feat/combo-health-fallback`，HEAD `4a86ad06`（2026-09-14 大版本已提交推送）
 - **现役容器 `9router-local` 已 Up**（自建镜像 `localhost/9router:local`，20128，数据 bind mount `~/docker_workspace/9router/data`）
 - **数据层**：SQLite，**rollback journal 模式**（已从 WAL 切出，无 `-shm`，宿主机可直接查库不冲突）
 - **combo 降级策略已上线**：404/401/403 冷却 2min、429 按上游窗口锁、5xx 不记，全员冷却硬试
@@ -22,11 +22,28 @@
 - **comboName 写 bug 已修复**：之前调用点读 `body?.comboName`（body 里没有该字段 → 全落 null），已改为从函数参数读取。修复已随最新镜像上线
 - **podman machine**：6C/8G/100G（2026-09-13 实测 `podman machine list`；旧文档写 8C 已纠正），容器 restart=unless-stopped 自愈
 
+### 2026-09-14 会话增量（已上线，随 `4a86ad06`）
+
+1. **仪表盘**：usage 页全宽（`DashboardLayout` 按 `/dashboard/usage` 路径豁免 `max-w-7xl`）、表格去 min-w 自适应、Latency 压单行、筛选加 Combo 下拉（`getDistinctCombos()`）
+2. **详情原文**：新增 `GET /api/usage/request-details/[id]`（dashboard 鉴权），抽屉点开拉全文；列表接口保持脱敏
+3. **Fallback 选择 bug**：`combos/page.js` 选 Fallback 曾被当默认删条目 → 实际跑全局 round-robin。已改为显式写 `fallbackStrategy:"fallback"`；存量 `muse-spark-1.3` 已修正
+4. **流中断回填**：客户端断连时占位行回填 `status=error` + `client disconnected after Xms (ResponseAborted)`，`detailGuard` 互斥防晚到完成回调覆盖；日志 `STREAM INTERRUPTED`
+5. **compose 构建修复**：`docker-compose.yml` 补 `build.context=./9router-src`（此前 compose build 空跑返回成功）；镜像变了 `up -d` 会自动重建容器
+6. **data.sqlite 第 4 次损坏与恢复**：PATCH settings 后再次 malformed；`.recover` 重建 `/tmp/rebuilt_0914.sqlite` 灌回恢复，`requestDetails.db` 未受影响；损坏现场 `data.sqlite.corrupt-20260914-1330`
+7. **combo 排序调整（用户已确认）**：`glm-5.3-flash` 重排为 `[deepseek, step, z-ai]`（原 z-ai 首位 TTFT~13s，重排后其中断归零）；**`muse-spark-1.3` 用户明确要求不动**
+
+### 中断排查结论（2026-09-14，未完全闭环）
+
+- `client disconnected` 约占请求 1/3；非网关问题，是客户端（上游调用方）掐线
+- `glm-5.3-flash` 侧：调用方是 new-api 的 `claude` token（cc-connect 飞书 bot / Claude SDK）。同一会话内 claude-code SDK 等首字 ~3-8s 超时就掐线重发（重发蹭缓存后成功）；cc-connect 日志对掐线零感知。deepseek 中断 22 次全是 combo 尝试行（第三棒接锅），根因在 muse 慢/前两棒拖时
+- `muse-spark-1.3` 侧：`cl/cline-free` 免费路 429 抽风（当日额度反复横跳），oc 偶发 1s fast-fail，溢出到 deepseek 第三棒时客户端已掐线；用户确认 muse 排序不动
+- **待办**：cl 沉底/禁用（等用户拍板）；中断率监控（Error contains `client disconnected`）
+
 ## 目录结构（当前）
 
 ```
 ~/docker_workspace/9router/
-├── 9router-src/          # fork 源码（git，分支 feat/combo-health-fallback，干净，1 个 untracked snapshot）
+├── 9router-src/          # fork 源码（git，分支 feat/combo-health-fallback）
 ├── data/                 # 9Router 数据（SQLite/auth/logs），现役容器 bind mount 指向这里
 │   └── db/data.sqlite    # rollback journal 模式（无 -wal/-shm），宿主机可直接查
 ├── docker-compose.yml    # 现役容器的编排（含明文 INITIAL_PASSWORD，勿提交 git）
