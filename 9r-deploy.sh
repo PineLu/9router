@@ -4,7 +4,7 @@
 #
 # 部署形态：宿主机源码直跑（launchd 托管），非容器。
 #   - plist: ~/Library/LaunchAgents/com.9router.local.plist（RunAtLoad + KeepAlive）
-#   - 数据:  ~/docker_workspace/9router/data（DATA_DIR，与容器时代同一份）
+#   - 数据:  ~/.9router（DATA_DIR，与容器时代同一份）
 #   - 端口:  20128
 # 详见 knowledge/9router-knowledge.md「部署形态」。
 #
@@ -19,7 +19,7 @@ set -uo pipefail
 
 NODE="$HOME/.local/bin/node"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # 仓库根（脚本就在仓库根目录）
-DATA_DIR="$HOME/docker_workspace/9router/data"
+DATA_DIR="$HOME/.9router"
 PLIST_LABEL="com.9router.local"
 LOG="/tmp/9r-deploy-$(date +%Y%m%d-%H%M%S).log"
 DB="$DATA_DIR/db/data.sqlite"
