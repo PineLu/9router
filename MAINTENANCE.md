@@ -93,6 +93,8 @@ podman-compose up -d
 
 ```bash
 cd 9router-src   # 分支 feat/combo-health-fallback
+# 0. 清理悬空镜像（每次构建会遗留旧镜像 ~700MB，长期不清理会撑爆磁盘）
+podman image prune -a -f
 # 1. 跑测试（宿主无依赖，用 builder 镜像跑）
 podman build --target builder -t 9router:builder .
 podman run --rm 9router:builder npx vitest run tests/unit/combo-*.test.js

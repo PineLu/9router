@@ -6,10 +6,12 @@
 export const SCHEMA_VERSION = 1;
 
 export const PRAGMA_SQL = `
-PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
+-- rollback journal (DELETE), NOT WAL: WAL's -shm mmap breaks on podman
+-- virtiofs bind mounts (macOS) and corrupted this DB 6+ times. Do not revert.
+PRAGMA journal_mode = DELETE;
+PRAGMA synchronous = FULL;
 PRAGMA temp_store = MEMORY;
-PRAGMA mmap_size = 30000000;
+PRAGMA mmap_size = 0;
 PRAGMA cache_size = -64000;
 PRAGMA foreign_keys = ON;
 PRAGMA busy_timeout = 5000;
