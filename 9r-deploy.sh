@@ -9,16 +9,16 @@
 # 详见 knowledge/9router-knowledge.md「部署形态」。
 #
 # 用法:
-#   scripts/9r-deploy.sh               完整流程：install → build → 重启 → 验证
-#   scripts/9r-deploy.sh --skip-build  跳过构建，只重启+验证（改 plist/数据时用）
-#   scripts/9r-deploy.sh -h            帮助
+#   ./9r-deploy.sh               完整流程：install → build → 重启 → 验证
+#   ./9r-deploy.sh --skip-build  跳过构建，只重启+验证（改 plist/数据时用）
+#   ./9r-deploy.sh -h            帮助
 #
 # 退出码: 0 = 全部通过; 1 = 某步失败
 # ============================================================
 set -uo pipefail
 
 NODE="$HOME/.local/bin/node"
-SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # 仓库根（scripts/ 的上级）
+SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # 仓库根（脚本就在仓库根目录）
 DATA_DIR="$HOME/docker_workspace/9router/data"
 PLIST_LABEL="com.9router.local"
 LOG="/tmp/9r-deploy-$(date +%Y%m%d-%H%M%S).log"
