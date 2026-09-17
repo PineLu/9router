@@ -1,6 +1,6 @@
 # 9Router 维护文档
 
-> 更新：2026-09-16 | 现状：**宿主机源码直跑 + launchd 托管**；数据目录 `~/.9router`；容器版已彻底退役；SQLite rollback journal 模式
+> 更新：2026-09-17 | 现状：**宿主机源码直跑 + launchd 托管**；数据目录 `~/.9router`；容器版已彻底退役；SQLite rollback journal 模式
 
 ## 1. 架构总览
 
@@ -199,3 +199,54 @@ launchctl load ~/Library/LaunchAgents/com.9router.local.plist
 - 直写 SQLite 后应用侧可能延迟才可见，改 combo 优先走仪表盘/API
 - 429 双层冷却统一策略：账号层/ combo 层都走 `parseUpstreamRetryMs`（支持复合 `6h 37m`），有窗口按窗口封顶 30min，无窗口才指数退避
 - 锁粒度：`connectionId × model`（`modelLock_${model}` 写在单个 connection 记录上）。同账号其他模型、其他账号同模型都不受影响
+- **bash 3.2 陷阱**：macOS 自带 bash 3.2 在 `set -u` 下，`$VAR` 紧跟多字节 UTF-8 字符（中文全角括号 `）`、逗号 `，` 等）会把后续字节并入变量名，报 `VAR: unbound variable`。写脚本时变量一律用 `${VAR}` 花括号形式（`9r-deploy.sh` 2026-09-17 踩过）
+
+## 12. OpenCode 免费档 403（FreeTierError）
+
+**症状**：`oc/*-free` 模型全部 403，body 为
+`{"type":"error","error":{"type":"FreeTierError","message":"Error from provider (Console): OpenCode's free tier can only be used from within OpenCode"}}`
+
+**根因**：OpenCode Zen 免费档（`Authorization: Bearer public`）的服务端客户端指纹校验。两道**独立**检查，任一不过都报同一个 403：
+
+1. `User-Agent` 必须是 `opencode/<semver ≥ 1.17.0>`（裸 `opencode`、`curl/*`、`Claude-Code/*` 等一律 403；`0.0.0` 回 426）
+2. `x-opencode-session` 必须匹配 `/^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/`（30 字符；UUID 形式、空值、缺失均 403）
+
+**排查思路**：403 与 429 要分清——**403 = 指纹没过，429 = 指纹已过只是配额限流**。若 403 再现，说明上游又改了规则，去 [sst/opencode#49433](https://github.com/sst/opencode/issues/49433) 看有没有新的对照实验表，照着改 `open-sse/executors/opencode.js` 的 UA / session 生成即可。
+
+> ⚠️ **限流优先于指纹校验**：出口 IP 被限流时，**所有**请求（含裸 UA 这种本该 403 的）都回 429，此时无法区分指纹是否通过。要复现 403/429 的差异，必须用未被限流的出口 IP（换网络，或等匿名配额窗口滚动）。
+
+**当前实现**（2026-09-17 已修，cherry-pick 自上游 PR #4105 提交 `15fe6b90`）：
+
+- `OPENCODE_UA = "opencode/1.18.31"`；`hasValidOpencodeVersion()` 判定下游 UA，合法（≥1.17 的 opencode）则透传保 cache，否则升级
+- `generateSessionId()` 生成规范 `ses_` ID；`translateSessionId()` 用 sha256 把外部会话（claude/codex/uuid 等）确定性映射成合法格式，保多轮 prompt cache
+- 会话状态挂在每请求 credentials 副本（`_opencodeSession`）上，不再用单例 `this._currentSessionId`（旧实现有跨请求泄漏 bug）
+- 单测 `tests/unit/opencode-session.test.js`
+
+**验证手法**（用代码里的真实生成器，不要手写 session ID——时间戳部分有校验）：
+
+```bash
+# 直连上游：观察状态码。403=指纹没过；429=指纹已过被限流（正常，换出口或等窗口）
+# 注意：被限流时一律 429，测不出指纹差异
+node --input-type=module -e '
+import crypto from "node:crypto";
+const B62="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+const t=BigInt(Date.now())*0x1000n+1n, v=~t;
+const hex=Array.from({length:6},(_,i)=>Number((v>>BigInt(40-8*i))&0xffn).toString(16).padStart(2,"0")).join("");
+const rnd=Array.from(crypto.randomBytes(14),b=>B62[b%62]).join("");
+const H={"Content-Type":"application/json","Authorization":"Bearer public",
+  "User-Agent":"opencode/1.18.31","x-opencode-session":"ses_"+hex+rnd,
+  "x-opencode-request":"msg_"+hex+rnd};
+const r=await fetch("https://opencode.ai/zen/v1/chat/completions",{method:"POST",headers:H,
+  body:JSON.stringify({model:"mimo-v2.5-free",stream:false,max_tokens:16,
+  messages:[{role:"user",content:"hi"}]})});
+console.log(r.status, (await r.text()).slice(0,200));'
+
+# 走本机网关端到端
+curl -s -m 60 -X POST http://localhost:20128/v1/chat/completions \
+  -H "Authorization: Bearer <key>" -H "Content-Type: application/json" \
+  -d '{"model":"oc/mimo-v2.5-free","stream":false,"max_tokens":32,
+       "messages":[{"role":"user","content":"hi"}]}'
+```
+
+> 429 是**出口 IP 级**匿名配额，换网络出口或等窗口滚动即可，非代码问题。
+

@@ -1,6 +1,6 @@
 # HANDOFF — 9Router 宿主机部署 + Combo 降级策略优化
 
-> 最后更新：2026-09-16（分支干净，HEAD `2decee94`）
+> 最后更新：2026-09-17（oc 免费档 403 修复已部署，待提交；HEAD `0db1f5cd`）
 > 仓库：`https://github.com/PineLu/9router.git`（fork 自 decolua/9router）
 > 本地源码：`/Users/qitmac001720/tujia_workspace/9router`（分支 `feat/combo-health-fallback`）
 > 交接人：松林 ↔ AI 助手
@@ -13,7 +13,7 @@
 
 **2026-09-16 重大变更**：部署形态从 **podman 容器** 切换为 **宿主机源码直跑 + launchd 托管**，数据目录迁移到官方默认 `~/.9router`，容器版**彻底退役**。
 
-## 当前状态（2026-09-16 更新，HEAD `2decee94` 已推送）
+## 当前状态（2026-09-17 更新，HEAD `0db1f5cd` + 未提交 oc 修复）
 
 ### 部署形态（现役）
 
@@ -36,6 +36,7 @@
 - **仪表盘**：明细 Status/Error/Account/Combo 列、日期筛选、错误搜索、Health 卡、combos 页冷却横条
 - **明细来源字段**：`requestDetails` 和 `usageHistory` 两表有 `comboName`（combo 路由标记，直连为 null）和 `requestedModel`（客户端原始 model）
 - **DB 写入重试**：`SQLITE_BUSY`/`database is locked`/`disk I/O error` 退避重试 4 次（50/100/200/400ms）
+- **oc 免费档 403 修复（2026-09-17，未提交）**：见下文「E. OpenCode 免费档 403 修复」
 
 ### 当前 combo 配置
 
@@ -123,6 +124,37 @@ sqlite3 ~/.9router/db/data.sqlite \
 - 根因：podman machine macOS virtiofs bind mount 的 mmap 一致性有 bug，WAL 的 `-shm` 文件在容器进程和宿主机 sqlite3 CLI 之间页缓存互相打架 → 写坏（共 6 次）
 - **关键教训**：只改运行时 `PRAGMA` 无效——源码 `schema.js` 写死 WAL，每次启动都会切回去。必须改源码才治本
 - 切到宿主机直跑后，virtiofs 这一层彻底消失
+
+### E. OpenCode 免费档 403 修复（2026-09-17）
+
+**Issue**：[decolua/9router#4101](https://github.com/decolua/9router/issues/4101)（同 #4103）。`oc/mimo-v2.5-free`、`oc/muse-spark-*-free` 从 9-16 起全部 403 `FreeTierError: "OpenCode's free tier can only be used from within OpenCode"`。上游 master 尚未带修复（停在 9-11 `17c4cc76`），本 fork 已先行 cherry-pick。
+
+**根因**（逆向自 [sst/opencode#49433](https://github.com/sst/opencode/issues/49433) 的指纹对照实验）：OpenCode 9-16/17 在 Zen 免费档（`Authorization: Bearer public`）加了**两道独立**的服务端指纹校验：
+
+| 检查点 | 上游要求 | 修复前 9Router 发的 | 结果 |
+|---|---|---|---|
+| `User-Agent` | `opencode/<semver ≥1.17.0>`（大小写不敏感；`0.0.0`→426，裸 `opencode`/第三方 UA→403） | 裸 `opencode`（无版本） | 403 |
+| `x-opencode-session` | `ses_` + 12位hex时间 + 14位base62（共 30 字符，正则 `/^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/`） | `ses_<UUID去横线>`（36 字符） | 403 |
+
+`x-opencode-client` / `x-opencode-request` / `x-opencode-project` 不校验；body 无关；与 key 无关。被拒时统一报 403 `FreeTierError`，无法区分是哪一道挂的。
+
+**修复方案**（cherry-p 自上游 PR [decolua/9router#4105](https://github.com/decolua/9router/pull/4105) 的提交 `15fe6b90`，作者 anojndr，作者本人实测上游 200）：
+
+改动文件 `open-sse/executors/opencode.js`（+120/-13）+ 新增 `tests/unit/opencode-session.test.js`：
+
+1. **UA**：`OPENCODE_UA = "opencode/1.18.31"`；新增 `hasValidOpencodeVersion()` 判断下游客户端 UA——下游本身就是 ≥1.17 的 opencode 则原样透传（保 prompt cache），否则（裸版本 / 旧版本 / 外部 UA 如 curl、Claude Code）统一升级为 `opencode/1.18.31`
+2. **会话 ID**：新增 `generateSessionId()` 按上游 `Identifier.create` 逆向算法生成（`ses_`+时间反码 hex+随机 base62）；新增 `translateSessionId()` 用 sha256 把外部会话身份（`claude:<uuid>`、codex、antigravity 等）**确定性**映射成合法 `ses_` 格式——同会话同 ID，多轮 prompt caching 不丢；下游已经是合法 `ses_` 格式的原样保留
+3. **顺带修了一个存量 bug**：旧代码把 session 存在单例 executor 的 `this._currentSessionId` 上，并发/串行请求会互相泄漏 session；改为 `prepareRequestCredentials()` 在每请求的 credentials 副本上携带（`_opencodeSession` 字段），不碰共享状态
+
+**验证**：
+- 122 项本地断言全过（格式正则、确定性、UA 升降级、header 注入、状态隔离）
+- 上游实探对比：修复前 403 `FreeTierError` → 修复后 **429 `FreeUsageLimitError`**（指纹已放行，只剩 IP 级匿名配额限流，属正常）
+- `./9r-deploy.sh` 全绿上线（PID 13457），端到端走网关验证同上
+
+**注意**：429 是**出口 IP 级**匿名配额（当时 IP `103.151.173.204`），等窗口滚动恢复，不是代码问题。若 403 再现，大概率是上游又改了指纹规则，优先比对 `sst/opencode#49433` 的最新实验数据。
+
+**顺带修**：`9r-deploy.sh` 在 macOS 上一直跑不起来——第 41 行 `$SRC_DIR）` 后紧跟中文括号，macOS 自带 bash 3.2 在 `set -u` 下把多字节字符并入变量名报 `SRC_DIR: unbound variable`。5 处 `$VAR` 紧贴全角标点全部改成 `${VAR}`。教训：bash 3.2 变量引用一律加花括号。
+
 
 ## 上游 issue 对照（2026-09-14 查证）
 

@@ -31,18 +31,18 @@ for a in "$@"; do
   case "$a" in
     --skip-build) SKIP_BUILD=1 ;;
     -h|--help) awk 'NR>2 && /^# ={20,}$/ {exit} NR>2 {print}' "$0"; exit 0 ;;
-    *) echo "未知参数: $a（用 -h 看帮助）"; exit 1 ;;
+    *) echo "未知参数: ${a}（用 -h 看帮助）"; exit 1 ;;
   esac
 done
 
 step() { echo; echo "======== $1 ========"; }
 
 if [ $SKIP_BUILD -eq 0 ]; then
-  step "1/3 构建（npm install + next build，在 $SRC_DIR）"
+  step "1/3 构建（npm install + next build，在 ${SRC_DIR}）"
   cd "$SRC_DIR" || exit 1
   npm install --silent 2>&1 | tail -1
   npm run build >"$LOG" 2>&1 || { echo "❌ 构建失败，日志尾部："; tail -20 "$LOG"; exit 1; }
-  echo "构建完成（日志: $LOG）"
+  echo "构建完成（日志: ${LOG}）"
 fi
 
 step "2/3 launchd 重启（服务中断几秒）"
@@ -78,12 +78,12 @@ fi
 # 3.4 数据库完好 + journal 模式正确（防 WAL 回潮）
 if [ -f "$DB" ]; then
   JM=$(/usr/bin/sqlite3 -readonly "$DB" "PRAGMA journal_mode;" 2>&1)
-  echo "journal_mode: $JM（应为 delete）"
+  echo "journal_mode: ${JM}（应为 delete）"
   [[ "$JM" == "delete" ]] || { echo "❌ journal_mode 不是 delete，WAL 回潮了！"; FAIL=1; }
   QC=$(/usr/bin/sqlite3 -readonly "$DB" "PRAGMA quick_check;" 2>&1 | head -1)
   [[ "$QC" == "ok" ]] || { echo "❌ 数据库 quick_check 异常: $QC"; FAIL=1; }
 else
-  echo "⚠️ 找不到 $DB，跳过 DB 验证"
+  echo "⚠️ 找不到 ${DB}，跳过 DB 验证"
 fi
 
 # 3.5 运行日志无 malformed
