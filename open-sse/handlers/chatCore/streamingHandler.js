@@ -92,7 +92,7 @@ export async function handleStreamingResponse({ providerResponse, provider, mode
   saveRequestDetail(buildRequestDetail({
     provider, model, connectionId,
     comboName: comboName || null,
-    requestedModel: body?.model || null,
+    requestedModel: clientRawRequest?.body?.model || body?.model || null,
     latency: { ttft: 0, total: Date.now() - requestStartTime },
     tokens: { prompt_tokens: 0, completion_tokens: 0 },
     request: extractRequestConfig(body, stream),
@@ -136,8 +136,12 @@ export function buildOnStreamComplete({ provider, model, connectionId, apiKey, r
     // extra.finishReason is best (translator-reported); fall back to refusal
     // text when a provider refuses with finish_reason=stop.
     const finishReason = extra?.finishReason ?? null;
+    const normalizedFinish = finishReason == null ? "" : String(finishReason).toLowerCase();
+    const textRefusalEligible =
+      !normalizedFinish || normalizedFinish === "stop" || normalizedFinish === "end_turn"
+      || normalizedFinish === "completed" || normalizedFinish === "done";
     const filtered = isContentFilterFinish(finishReason)
-      || (!finishReason && isRefusalText(safeContent));
+      || (textRefusalEligible && isRefusalText(safeContent));
     if (filtered && comboName) {
       const hit = finishReason ? `finish=${finishReason}` : "refusal-text";
       const cooldownMs = recordComboFailure(
@@ -151,7 +155,7 @@ export function buildOnStreamComplete({ provider, model, connectionId, apiKey, r
     saveRequestDetail(buildRequestDetail({
       provider, model, connectionId,
       comboName: comboName,
-      requestedModel: body?.model || null,
+      requestedModel: clientRawRequest?.body?.model || body?.model || null,
       latency,
       tokens: usage || { prompt_tokens: 0, completion_tokens: 0 },
       request: extractRequestConfig(body, stream),
@@ -165,7 +169,7 @@ export function buildOnStreamComplete({ provider, model, connectionId, apiKey, r
     });
 
     // Persist stream usage to DB (no console line; the "📊 done" line below is authoritative)
-    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, label: "STREAM USAGE", silent: true });
+    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, comboName, requestedModel: clientRawRequest?.body?.model || body?.model || null, label: "STREAM USAGE", silent: true });
     if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency }));
   };
 
