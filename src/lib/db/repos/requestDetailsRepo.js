@@ -6,6 +6,10 @@ const DEFAULT_BATCH_SIZE = 20;
 const DEFAULT_FLUSH_INTERVAL_MS = 5000;
 const DEFAULT_MAX_JSON_SIZE = 5 * 1024;
 const CONFIG_CACHE_TTL_MS = 5000;
+// Hard cap on the in-memory pending buffer. A batch that cannot be persisted is
+// requeued (never silently dropped), so without a cap a permanently-broken DB
+// would grow the buffer without bound. Oldest records are dropped on overflow.
+const DEFAULT_MAX_BUFFER_RECORDS = 1000;
 
 let cachedConfig = null;
 let cachedConfigTs = 0;
@@ -68,7 +72,38 @@ function sanitizeHeaders(headers) {
   return sanitized;
 }
 
-export const __test__ = { sanitizeHeaders };
+export const __test__ = { sanitizeHeaders, flushToDatabase };
+
+function getMaxBufferRecords() {
+  const n = parseInt(
+    process.env.OBSERVABILITY_MAX_BUFFER_RECORDS || String(DEFAULT_MAX_BUFFER_RECORDS),
+    10
+  );
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_MAX_BUFFER_RECORDS;
+}
+
+/**
+ * Single entry point for the pending buffer. `front` is used to requeue a batch
+ * whose final DB write failed: those records are older than anything pushed
+ * since, so they go back at the head. Overflow drops the OLDEST records and
+ * keeps the newest — losing the stale tail of an unpersistable backlog beats
+ * losing the request that just happened.
+ */
+function enqueueDetails(items, { front = false } = {}) {
+  if (!Array.isArray(items) || items.length === 0) return;
+
+  if (front) writeBuffer.unshift(...items);
+  else writeBuffer.push(...items);
+
+  const max = getMaxBufferRecords();
+  if (writeBuffer.length > max) {
+    const overflow = writeBuffer.length - max;
+    writeBuffer.splice(0, overflow);
+    console.error(
+      `[requestDetailsRepo] Buffer overflow: dropped ${overflow} oldest request detail record(s); max=${max}`
+    );
+  }
+}
 
 function generateDetailId(model) {
   const timestamp = new Date().toISOString();
@@ -100,7 +135,8 @@ async function flushToDatabase() {
       // drops the whole drained batch silently (usage rows + detail rows lost,
       // and usageHistory IDs skip — see 9router#3488). Back off and retry.
       const BUSY_RETRIES = 4;
-      for (let attempt = 0; ; attempt++) {
+      let persisted = false;
+      for (let attempt = 0; attempt <= BUSY_RETRIES; attempt++) {
         try {
           db.transaction(() => {
             for (const item of items) {
@@ -140,6 +176,7 @@ async function flushToDatabase() {
               );
             }
           });
+          persisted = true;
           break; // success
         } catch (e) {
           const msg = String(e?.message || e);
@@ -151,6 +188,18 @@ async function flushToDatabase() {
           await new Promise((r) => setTimeout(r, 50 * 2 ** attempt));
           console.warn(`[requestDetailsRepo] Transient DB error, retrying (${attempt + 1}/${BUSY_RETRIES}): ${msg}`);
         }
+      }
+
+      // Final failure: put the batch back instead of losing it, then stop this
+      // drain. Requeue-then-continue would re-drain the same failing batch in a
+      // tight loop (CPU + log spam), so we return and let the next timer tick,
+      // saveRequestDetail() call, or shutdown attempt retry it.
+      if (!persisted) {
+        enqueueDetails(items, { front: true });
+        console.error(
+          `[requestDetailsRepo] Requeued ${items.length} request detail record(s) after final DB write failure`
+        );
+        break;
       }
     }
   } catch (e) {
@@ -164,7 +213,7 @@ export async function saveRequestDetail(detail) {
   const config = await getObservabilityConfig();
   if (!config.enabled) {return;}
 
-  writeBuffer.push(detail);
+  enqueueDetails([detail]);
 
   // Trigger immediate flush if batch threshold reached.
   // flushToDatabase() drains entire buffer in a loop, so all pushes during await are persisted.
