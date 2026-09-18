@@ -46,14 +46,9 @@ function buildTransformStream({ provider, sourceFormat, targetFormat, userAgent,
  * Handle streaming response — pipe provider SSE through transform stream to client.
  */
 export async function handleStreamingResponse({ providerResponse, provider, model, sourceFormat, targetFormat, userAgent, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, reqLogger, toolNameMap, customToolNames, streamController, onStreamComplete, streamDetailId, pxpipe, reqTag, log, credentials, comboName = null }) {
-  if (onRequestSuccess) {
-    Promise.resolve()
-      .then(onRequestSuccess)
-      .catch(err => {
-        console.error("[ChatCore] onRequestSuccess failed:", err?.message || err);
-      });
-  }
-
+  // Do not mark account/model success when the stream merely starts. A 200 can
+  // still carry an HTML error page or finish as a content-filter refusal.
+  // Success is recorded by onStreamComplete only after a normal terminal event.
   // When upstream returns HTML/text instead of SSE (e.g. Cloudflare 5xx error
   // page), piping it through the SSE transform stream causes Next.js
   // "failed to pipe response" and crashes the chat router. Read the body,
@@ -119,8 +114,9 @@ export async function handleStreamingResponse({ providerResponse, provider, mode
  * combo-level failure memory so the NEXT request in the same combo skips this
  * model — the in-flight response itself cannot be rewritten mid-stream.
  */
-export function buildOnStreamComplete({ provider, model, connectionId, apiKey, requestStartTime, body, stream, finalBody, translatedBody, clientRawRequest, pxpipe, reqTag, log, comboName = null }) {
+export function buildOnStreamComplete({ provider, model, connectionId, apiKey, requestStartTime, body, stream, finalBody, translatedBody, clientRawRequest, onRequestSuccess, pxpipe, reqTag, log, comboName = null }) {
   const streamDetailId = `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+  let successRecorded = false;
 
   const onStreamComplete = (contentObj, usage, ttftAt, extra = null) => {
     const latency = {
@@ -150,6 +146,13 @@ export function buildOnStreamComplete({ provider, model, connectionId, apiKey, r
       if (log?.line) log.line(reqTag, "🚫", `CONTENT_FILTER · ${provider}/${model} · cooling ${Math.round(cooldownMs / 1000)}s · ${hit}`);
     } else if (filtered) {
       if (log?.line) log.line(reqTag, "🚫", `CONTENT_FILTER · ${provider}/${model} (no combo → memory only)`);
+    } else if (!successRecorded && onRequestSuccess) {
+      successRecorded = true;
+      Promise.resolve()
+        .then(onRequestSuccess)
+        .catch((err) => {
+          console.error("[ChatCore] onRequestSuccess failed:", err?.message || err);
+        });
     }
 
     saveRequestDetail(buildRequestDetail({
