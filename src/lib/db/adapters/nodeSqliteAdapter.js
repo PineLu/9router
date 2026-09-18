@@ -37,14 +37,12 @@ export async function createNodeSqliteAdapter(filePath) {
     try { stmtCache.clear(); } catch {}
     try { db.close(); } catch {}
   }
-  // Close the handle on shutdown, but do NOT exit the process: the app owns the
-  // shutdown sequence (requestDetailsRepo flushes pending rows on SIGINT/SIGTERM
-  // and exits itself). Calling process.exit() here would kill the process before
-  // that async flush could finish.
-  const onShutdown = () => gracefulClose();
-  process.once("beforeExit", onShutdown);
-  process.once("SIGINT", onShutdown);
-  process.once("SIGTERM", onShutdown);
+  // Close only during the synchronous process "exit" phase. The application
+  // owns SIGINT/SIGTERM and must finish any async request-detail flush before
+  // the DB handle is closed. close() removes this listener when the adapter is
+  // disposed manually (tests / reinitialization), so listeners do not stack.
+  const onExit = () => gracefulClose();
+  process.once("exit", onExit);
 
   return {
     driver: "node:sqlite",
@@ -72,7 +70,10 @@ export async function createNodeSqliteAdapter(filePath) {
         throw e;
       }
     },
-    close() { gracefulClose(); },
+    close() {
+      process.off("exit", onExit);
+      gracefulClose();
+    },
     raw: db,
   };
 }
