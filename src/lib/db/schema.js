@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const PRAGMA_SQL = `
 -- rollback journal (DELETE), NOT WAL: WAL's -shm mmap breaks on podman
@@ -116,6 +116,7 @@ export const TABLES = {
       model: "TEXT",
       connectionId: "TEXT",
       comboName: "TEXT",
+      requestedModel: "TEXT",
       apiKey: "TEXT",
       endpoint: "TEXT",
       promptTokens: "INTEGER DEFAULT 0",
