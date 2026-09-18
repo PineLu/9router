@@ -60,6 +60,13 @@ export function checkFallbackError(status, errorText, backoffLevel = 0, retryAft
     }
   }
 
+  // Request-scoped client errors that matched no rule above say nothing about
+  // credential health. Preserve upstream v0.5.81 semantics while keeping our
+  // provider retry-window handling above.
+  if (status >= 400 && status < 500 && status !== 401 && status !== 402 && status !== 403 && status !== 429) {
+    return { shouldFallback: false, cooldownMs: 0 };
+  }
+
   // Default: transient cooldown for any unmatched error
   return { shouldFallback: true, cooldownMs: TRANSIENT_COOLDOWN_MS };
 }
