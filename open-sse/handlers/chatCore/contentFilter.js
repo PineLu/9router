@@ -89,6 +89,41 @@ function checkGeminiBody(body) {
   return null;
 }
 
+function responsesTextParts(body) {
+  const output = Array.isArray(body?.output) ? body.output : [];
+  const parts = [];
+  for (const item of output) {
+    if (item?.type !== "message" || !Array.isArray(item.content)) continue;
+    for (const part of item.content) {
+      if (typeof part?.refusal === "string" && part.refusal) {
+        parts.push({ text: part.refusal, refusal: true });
+      } else if (typeof part?.text === "string" && part.text) {
+        parts.push({ text: part.text, refusal: part?.type === "refusal" });
+      }
+    }
+  }
+  return parts;
+}
+
+function checkResponsesBody(body) {
+  const output = Array.isArray(body?.output) ? body.output : [];
+  if (output.length === 0) return null;
+
+  const parts = responsesTextParts(body);
+  if (parts.some((part) => part.refusal)) return "response-refusal";
+
+  // A working tool-call response is not a refusal merely because an adjacent
+  // text item mentions policy/safety.
+  const hasToolCalls = output.some((item) =>
+    item?.type === "function_call" || item?.type === "custom_tool_call"
+  );
+  if (hasToolCalls) return null;
+
+  const text = parts.map((part) => part.text).join("\n");
+  if (isRefusalText(text)) return "refusal-text";
+  return null;
+}
+
 /**
  * Inspect one or more response bodies (raw upstream and/or translated) for a
  * silent refusal. Returns a short reason code, or null when the body looks
@@ -97,7 +132,7 @@ function checkGeminiBody(body) {
 export function getContentFilterRefusal(...bodies) {
   for (const body of bodies) {
     if (!body || typeof body !== "object") continue;
-    const hit = checkOpenAIBody(body) || checkGeminiBody(body);
+    const hit = checkOpenAIBody(body) || checkGeminiBody(body) || checkResponsesBody(body);
     if (hit) return hit;
   }
   return null;
@@ -110,6 +145,10 @@ export function extractRefusalPreview(...bodies) {
   for (const body of bodies) {
     for (const choice of (Array.isArray(body?.choices) ? body.choices : [])) {
       const text = messageText(choice).replace(/\s+/g, " ").trim();
+      if (text) return text.slice(0, 120);
+    }
+    for (const part of responsesTextParts(body)) {
+      const text = part.text.replace(/\s+/g, " ").trim();
       if (text) return text.slice(0, 120);
     }
   }
