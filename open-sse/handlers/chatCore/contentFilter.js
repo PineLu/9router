@@ -22,20 +22,24 @@ const GEMINI_BLOCKED = new Set([
 // refusal semantics, not policy vocabulary alone: legitimate short answers
 // often discuss "content policy", "sensitive content", or moderation.
 const REFUSAL_TEXT_PATTERNS = [
-  // Direct inability / refusal language.
-  /\b(?:i\s+)?(?:cannot|can['’]t|am unable to|won['’]t|will not)\s+(?:help|assist|comply|provide|answer|continue)\b/i,
-  /\bunable to\s+(?:help|assist|comply|provide|answer|continue)\b/i,
-  /\bsorry\b.{0,60}\b(?:cannot|can['’]t|unable|won['’]t|will not)\b/i,
+  // Ambiguous phrases such as "I can't help but notice..." or "I cannot
+  // provide an exact estimate without logs" are normal answers, not policy
+  // refusals. Require the refusal to target the request/task, or explicit
+  // policy/safety language.
+  /\b(?:i\s+)?(?:cannot|can['’]t|am unable to|won['’]t|will not)\s+(?:help|assist|comply)\s+(?:with\s+)?(?:this|that|your|the)\s+(?:request|prompt|task)\b/i,
+  /\b(?:i\s+)?(?:cannot|can['’]t|am unable to|won['’]t|will not)\s+(?:help|assist|comply)\s+(?:with\s+)?(?:this|that)\b/i,
+  /\bsorry\b.{0,60}\b(?:cannot|can['’]t|unable|won['’]t|will not)\b.{0,60}\b(?:request|prompt|task|policy|safety|guidelines?)\b/i,
 
   // Explicit statement that THIS request/prompt/content violates a rule.
   /\b(?:this|that|your|the)\s+(?:request|prompt|content)\b.{0,50}\bviolates?\b.{0,40}\b(?:policy|policies|guidelines|rules)\b/i,
   /\b(?:policy|safety|guidelines?)\b.{0,40}\b(?:prevents?|prohibits?|does not allow)\b.{0,40}\b(?:help|assist|comply|provide|answer|continue)\b/i,
 
-  // Chinese direct refusal / explicit request-policy violation.
-  /抱歉.{0,30}(无法|不能|不便|拒绝)/,
-  /(我|本助手|模型).{0,10}(无法|不能).{0,30}(帮助|回答|提供|协助|满足|处理)/,
-  /(这个|该|您的|你的)?(请求|内容|问题).{0,20}(违反|不符合).{0,20}(政策|规定|规范|准则)/,
-  /(基于|由于).{0,20}(安全|政策|规定).{0,30}(无法|不能|拒绝)/,
+  // Chinese: require either an explicit request/content target or an explicit
+  // safety/policy reason. Generic "我无法判断/回答..." is not a refusal.
+  /抱歉.{0,30}(?:无法|不能|不便|拒绝).{0,30}(?:这个|该|您的|你的)?(?:请求|要求|内容)/,
+  /(?:我|本助手|模型).{0,10}(?:无法|不能).{0,30}(?:帮助|协助|处理).{0,20}(?:这个|该|您的|你的)?(?:请求|要求)/,
+  /(?:这个|该|您的|你的)?(?:请求|内容|问题).{0,20}(?:违反|不符合).{0,20}(?:政策|规定|规范|准则)/,
+  /(?:基于|由于).{0,20}(?:安全|政策|规定).{0,30}(?:无法|不能|拒绝)/,
 ];
 
 // Refusal texts are short apologies; cap the text-pattern match so a long
