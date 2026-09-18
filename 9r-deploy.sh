@@ -61,49 +61,15 @@ else
   echo "❌ launchd 服务未运行"; FAIL=1
 fi
 
-# 3.2 网关 API（宿主机 loopback，无需把 API Key 写进脚本）
-R=$(curl -s -m 8 http://localhost:20128/v1/models | head -c 60)
+# 3.2 网关 API（宿主机）
+R=$(curl -s -m 8 -H "Authorization: Bearer $VERIFY_KEY" http://localhost:20128/v1/models | head -c 60)
 echo "宿主机 /v1/models: ${R:0:60}"
 echo "$R" | grep -q '^{"object":"list"' || { echo "❌ 宿主机 API 不通"; FAIL=1; }
 
 # 3.3 new-api 容器 → 宿主机 9Router（podman 内置域名）
 # 跨容器请求不是 loopback，使用脚本内默认验证 Key；也可通过
 # NINEROUTER_VERIFY_KEY 临时覆盖。
-if [ -x "$PODMAN" ] && "$PODMAN" ps --format '{{.Names}}' 2>/dev/null | grep -q '^new-api
-  R2=$("$PODMAN" exec new-api wget -q -O - -T 5 --header "Authorization: Bearer $VERIFY_KEY" \
-        http://host.containers.internal:20128/v1/models 2>/dev/null | head -c 60)
-  echo "new-api → host.containers.internal:20128: ${R2:0:60}"
-  echo "$R2" | grep -q '^{"object":"list"' || { echo "❌ new-api → 9Router 不通或验证 Key 无效"; FAIL=1; }
-else
-  echo "⚠️ new-api 容器没在跑（或 podman 不可用），跳过跨容器验证"
-fi
-
-# 3.4 数据库完好 + journal 模式正确（防 WAL 回潮）
-if [ -f "$DB" ]; then
-  JM=$(/usr/bin/sqlite3 -readonly "$DB" "PRAGMA journal_mode;" 2>&1)
-  echo "journal_mode: ${JM}（应为 delete）"
-  [[ "$JM" == "delete" ]] || { echo "❌ journal_mode 不是 delete，WAL 回潮了！"; FAIL=1; }
-  QC=$(/usr/bin/sqlite3 -readonly "$DB" "PRAGMA quick_check;" 2>&1 | head -1)
-  [[ "$QC" == "ok" ]] || { echo "❌ 数据库 quick_check 异常: $QC"; FAIL=1; }
-else
-  echo "⚠️ 找不到 ${DB}，跳过 DB 验证"
-fi
-
-# 3.5 运行日志无 malformed
-OUT_LOG="$DATA_DIR/logs/9router-local.out.log"
-MAL=$(tail -100 "$OUT_LOG" 2>/dev/null | grep -c malformed || true)
-echo "近100行日志 malformed: $MAL 条"
-[ "$MAL" -eq 0 ] || { echo "❌ 仍有 malformed"; FAIL=1; }
-
-echo
-if [ $FAIL -eq 0 ]; then
-  echo "✅ 全部通过：9Router 新版本已上线（宿主机直跑），网关/跨容器/数据库均正常"
-  exit 0
-else
-  echo "❌ 有 $FAIL 项验证失败，见上方输出"
-  exit 1
-fi
-; then
+if [ -x "$PODMAN" ] && "$PODMAN" ps --format '{{.Names}}' 2>/dev/null | grep -q '^new-api$'; then
   R2=$("$PODMAN" exec new-api wget -q -O - -T 5 --header "Authorization: Bearer $VERIFY_KEY" \
         http://host.containers.internal:20128/v1/models 2>/dev/null | head -c 60)
   echo "new-api → host.containers.internal:20128: ${R2:0:60}"
