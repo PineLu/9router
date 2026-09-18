@@ -287,6 +287,43 @@ describe("dashboard guard local-only access", () => {
   });
 });
 
+describe("dashboard guard sensitive request details", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.NINEROUTER_PEER_TOKEN = PEER_TOKEN;
+    mocks.getSettings.mockResolvedValue({ requireLogin: false });
+    mocks.validateApiKey.mockResolvedValue(false);
+    mocks.getConsistentMachineId.mockResolvedValue("cli-token");
+    mocks.verifyDashboardAuthToken.mockResolvedValue(false);
+  });
+
+  it("keeps the redacted request-details list available when requireLogin=false", async () => {
+    const response = await proxy(request("/api/usage/request-details", {
+      host: "router.example.com",
+    }));
+
+    expect(response).toBe(mocks.nextResponse);
+  });
+
+  it("rejects an individual full request detail when requireLogin=false but no token is present", async () => {
+    const response = await proxy(request("/api/usage/request-details/detail-123", {
+      host: "router.example.com",
+    }));
+
+    expect(response.status).toBe(401);
+    expect(response.body.error).toBe("Unauthorized");
+  });
+
+  it("allows an individual full request detail with a valid CLI token", async () => {
+    const response = await proxy(request("/api/usage/request-details/detail-123", {
+      host: "router.example.com",
+      "x-9r-cli-token": "cli-token",
+    }));
+
+    expect(response).toBe(mocks.nextResponse);
+  });
+});
+
 describe("dashboard guard helpers", () => {
   it("extracts bearer API keys before x-api-key", () => {
     const apiRequest = request("/v1/chat/completions", {
