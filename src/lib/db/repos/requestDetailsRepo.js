@@ -62,7 +62,11 @@ async function getObservabilityConfig() {
 
 let writeBuffer = [];
 let flushTimer = null;
-let isFlushing = false;
+// Single-flight promise: concurrent flush callers (including shutdown) must
+// await the same in-progress write instead of treating "already flushing" as
+// "flush complete".
+let activeFlushPromise = null;
+let shuttingDown = false;
 
 function sanitizeHeaders(headers) {
   if (!headers || typeof headers !== "object") return {};
@@ -74,7 +78,12 @@ function sanitizeHeaders(headers) {
   return sanitized;
 }
 
-export const __test__ = { sanitizeHeaders, flushToDatabase };
+export const __test__ = {
+  sanitizeHeaders,
+  flushToDatabase,
+  getPendingBufferSize: () => writeBuffer.length,
+  hasActiveFlush: () => activeFlushPromise !== null,
+};
 
 function getMaxBufferRecords() {
   const n = parseInt(
@@ -107,6 +116,16 @@ function enqueueDetails(items, { front = false } = {}) {
   }
 }
 
+function scheduleFlush(delayMs) {
+  if (flushTimer || shuttingDown) return;
+  const delay = Number.isFinite(Number(delayMs)) ? Math.max(0, Number(delayMs)) : DEFAULT_FLUSH_INTERVAL_MS;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    flushToDatabase().catch((e) => console.error("[requestDetailsRepo] scheduled flush failed:", e));
+  }, delay);
+  flushTimer.unref?.();
+}
+
 function generateDetailId(model) {
   const timestamp = new Date().toISOString();
   const random = Math.random().toString(36).substring(2, 8);
@@ -122,13 +141,14 @@ function truncateField(obj, maxSize) {
   return obj || {};
 }
 
-async function flushToDatabase() {
-  if (isFlushing) return;
-  if (writeBuffer.length === 0) return;
-  isFlushing = true;
-  try {
-    // Drain entire buffer (loop in case more pushed during await)
-    while (writeBuffer.length > 0) {
+function flushToDatabase() {
+  if (activeFlushPromise) return activeFlushPromise;
+  if (writeBuffer.length === 0) return Promise.resolve();
+
+  activeFlushPromise = (async () => {
+    try {
+      // Drain entire buffer (loop in case more pushed during await)
+      while (writeBuffer.length > 0) {
       const items = writeBuffer.splice(0, writeBuffer.length);
       const db = await getAdapter();
       const config = await getObservabilityConfig();
@@ -192,23 +212,27 @@ async function flushToDatabase() {
         }
       }
 
-      // Final failure: put the batch back instead of losing it, then stop this
-      // drain. Requeue-then-continue would re-drain the same failing batch in a
-      // tight loop (CPU + log spam), so we return and let the next timer tick,
-      // saveRequestDetail() call, or shutdown attempt retry it.
-      if (!persisted) {
-        enqueueDetails(items, { front: true });
-        console.error(
-          `[requestDetailsRepo] Requeued ${items.length} request detail record(s) after final DB write failure`
-        );
-        break;
+        // Final failure: put the batch back instead of losing it, then stop this
+        // drain. Requeue-then-continue would re-drain the same failing batch in a
+        // tight loop. Schedule a later retry so recovery does not depend on a new
+        // request arriving; shutdown intentionally suppresses new timers.
+        if (!persisted) {
+          enqueueDetails(items, { front: true });
+          console.error(
+            `[requestDetailsRepo] Requeued ${items.length} request detail record(s) after final DB write failure`
+          );
+          scheduleFlush(config.flushIntervalMs);
+          break;
+        }
       }
+    } catch (e) {
+      console.error("[requestDetailsRepo] Batch write failed:", e);
     }
-  } catch (e) {
-    console.error("[requestDetailsRepo] Batch write failed:", e);
-  } finally {
-    isFlushing = false;
-  }
+  })();
+
+  return activeFlushPromise.finally(() => {
+    activeFlushPromise = null;
+  });
 }
 
 export async function saveRequestDetail(detail) {
@@ -222,11 +246,8 @@ export async function saveRequestDetail(detail) {
   if (writeBuffer.length >= config.batchSize) {
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
     flushToDatabase().catch((e) => console.error("[requestDetailsRepo] flush err:", e));
-  } else if (!flushTimer) {
-    flushTimer = setTimeout(() => {
-      flushTimer = null;
-      flushToDatabase().catch(() => {});
-    }, config.flushIntervalMs);
+  } else {
+    scheduleFlush(config.flushIntervalMs);
   }
 }
 
@@ -292,11 +313,12 @@ export async function getRequestDetailById(id) {
 // get their own bounded graceful flush below.
 // ---------------------------------------------------------------------------
 
-let shuttingDown = false;
-
 async function flushPendingForShutdown() {
   if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-  if (writeBuffer.length > 0) await flushToDatabase();
+  // Always await flushToDatabase(): when a batch is already in-flight the
+  // buffer may be empty, but the single-flight promise still represents work
+  // that must finish before shutdown.
+  await flushToDatabase();
 }
 
 async function gracefulShutdown(signal) {
@@ -324,14 +346,24 @@ const _sigintHandler = () => { void gracefulShutdown("SIGINT"); };
 const _sigtermHandler = () => { void gracefulShutdown("SIGTERM"); };
 
 function ensureShutdownHandler() {
-  // Re-register on module reload (hot reload) without stacking duplicate listeners.
-  process.off("beforeExit", _beforeExitHandler);
-  process.off("SIGINT", _sigintHandler);
-  process.off("SIGTERM", _sigtermHandler);
+  // Module reload creates new function identities, so process.off() with the
+  // new handlers cannot remove listeners installed by the previous module
+  // instance. Keep the previous identities on global and remove them first.
+  const prev = global._requestDetailsShutdownHandlers;
+  if (prev) {
+    if (prev.beforeExit) process.off("beforeExit", prev.beforeExit);
+    if (prev.sigint) process.off("SIGINT", prev.sigint);
+    if (prev.sigterm) process.off("SIGTERM", prev.sigterm);
+  }
 
   process.on("beforeExit", _beforeExitHandler);
   process.on("SIGINT", _sigintHandler);
   process.on("SIGTERM", _sigtermHandler);
+  global._requestDetailsShutdownHandlers = {
+    beforeExit: _beforeExitHandler,
+    sigint: _sigintHandler,
+    sigterm: _sigtermHandler,
+  };
 }
 
 // Test-only surface. Deliberately excludes gracefulShutdown(): it calls
