@@ -325,7 +325,7 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
 
   const usage = extractUsageFromResponse(responseBody);
   appendLog({ tokens: usage, status: "200 OK" });
-  saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, silent: true });
+  saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, comboName, requestedModel: clientRawRequest?.body?.model || body?.model || null, silent: true });
   if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
 
   const translatedResponse = needsTranslation(targetFormat, sourceFormat)
@@ -348,7 +348,7 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
     saveRequestDetail(buildRequestDetail({
       provider, model, connectionId,
       comboName: comboName || null,
-      requestedModel: body?.model || null,
+      requestedModel: clientRawRequest?.body?.model || body?.model || null,
       latency: { ttft: Date.now() - requestStartTime, total: Date.now() - requestStartTime },
       tokens: usage || { prompt_tokens: 0, completion_tokens: 0 },
       request: extractRequestConfig(body, stream),
@@ -410,6 +410,8 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
   const totalLatency = Date.now() - requestStartTime;
   saveRequestDetail(buildRequestDetail({
     provider, model, connectionId,
+    comboName: comboName || null,
+    requestedModel: clientRawRequest?.body?.model || body?.model || null,
     latency: { ttft: totalLatency, total: totalLatency },
     tokens: usage || { prompt_tokens: 0, completion_tokens: 0 },
     request: extractRequestConfig(body, stream),
