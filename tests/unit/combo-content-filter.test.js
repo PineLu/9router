@@ -25,7 +25,10 @@ const {
 } = await import("../../open-sse/handlers/chatCore/contentFilter.js");
 
 const { handleNonStreamingResponse } = await import("../../open-sse/handlers/chatCore/nonStreamingHandler.js");
+const { handleForcedSSEToJson } = await import("../../open-sse/handlers/chatCore/sseToJsonHandler.js");
 const { buildOnStreamComplete } = await import("../../open-sse/handlers/chatCore/streamingHandler.js");
+const { saveUsageStats } = await import("../../open-sse/handlers/chatCore/requestDetail.js");
+const usageDb = await import("@/lib/usageDb.js");
 const { handleComboChat, isComboModelCooling, resetComboRotation } = await import("../../open-sse/services/combo.js");
 
 function refusalBody() {
@@ -73,6 +76,29 @@ describe("contentFilter detector", () => {
       choices: [{ message: { role: "assistant", content: "I can't help with this request due to content policy." }, finish_reason: "stop" }],
     };
     expect(getContentFilterRefusal(body)).toBe("refusal-text");
+  });
+
+  it("flags Responses API refusal items and refusal output_text", () => {
+    const explicit = {
+      object: "response",
+      output: [{
+        type: "message",
+        role: "assistant",
+        content: [{ type: "refusal", refusal: "I can't help with this request." }],
+      }],
+    };
+    expect(getContentFilterRefusal(explicit)).toBe("response-refusal");
+    expect(extractRefusalPreview(explicit)).toContain("can't help");
+
+    const textOnly = {
+      object: "response",
+      output: [{
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "抱歉，我无法帮助处理这个请求。" }],
+      }],
+    };
+    expect(getContentFilterRefusal(textOnly)).toBe("refusal-text");
   });
 
   it("passes normal answers and tool_calls turns", () => {
@@ -174,6 +200,27 @@ describe("streaming refusal → combo failure memory for the NEXT request", () =
     expect(isComboModelCooling("my-combo", "codebuddy-cn/deepseek-v4.1-flash")).toBe(true);
   });
 
+  it("cools on finish_reason=stop when the streamed text is a refusal", () => {
+    const { onStreamComplete } = buildOnStreamComplete({
+      provider: "codebuddy-cn",
+      model: "deepseek-v4.1-flash",
+      connectionId: "c1",
+      apiKey: "k",
+      requestStartTime: Date.now(),
+      body: {},
+      stream: true,
+      finalBody: null,
+      translatedBody: null,
+      clientRawRequest: null,
+      pxpipe: null,
+      reqTag: "T",
+      log: { line() {} },
+      comboName: "my-combo",
+    });
+    onStreamComplete({ content: "抱歉，我无法帮助处理这个请求。", thinking: null }, null, Date.now(), { finishReason: "stop" });
+    expect(isComboModelCooling("my-combo", "codebuddy-cn/deepseek-v4.1-flash")).toBe(true);
+  });
+
   it("does nothing for a normal stop finish", () => {
     const { onStreamComplete } = buildOnStreamComplete({
       provider: "codebuddy-cn",
@@ -193,6 +240,91 @@ describe("streaming refusal → combo failure memory for the NEXT request", () =
     });
     onStreamComplete({ content: "here is the code", thinking: null }, null, Date.now(), { finishReason: "stop" });
     expect(isComboModelCooling("my-combo", "codebuddy-cn/deepseek-v4.1-flash")).toBe(false);
+  });
+});
+
+describe("forced Responses SSE → JSON", () => {
+  function responsesSse(item, usage = { input_tokens: 10, output_tokens: 4, total_tokens: 14 }) {
+    return [
+      'event: response.created',
+      'data: {"response":{"id":"resp-test","created_at":1700000000}}',
+      '',
+      'event: response.output_item.done',
+      `data: ${JSON.stringify({ output_index: 0, item })}`,
+      '',
+      'event: response.completed',
+      `data: ${JSON.stringify({ response: { usage } })}`,
+      '',
+      '',
+    ].join("\n");
+  }
+
+  function callForced(item) {
+    return handleForcedSSEToJson({
+      providerResponse: new Response(responsesSse(item), { headers: { "content-type": "text/event-stream" } }),
+      sourceFormat: "openai",
+      targetFormat: "openai-responses",
+      provider: "test-provider",
+      model: "test-model",
+      body: { model: "my-combo", stream: false },
+      stream: false,
+      translatedBody: null,
+      finalBody: null,
+      requestStartTime: Date.now(),
+      connectionId: "c1",
+      apiKey: "k",
+      clientRawRequest: { endpoint: "/v1/chat/completions", body: { model: "my-combo" } },
+      onRequestSuccess: () => {},
+      customToolNames: null,
+      trackDone: () => {},
+      appendLog: () => {},
+      reqTag: "T",
+      log: { line() {} },
+      comboName: "my-combo",
+    });
+  }
+
+  it("returns JSON instead of throwing on a normal Responses body", async () => {
+    const result = await callForced({
+      type: "message",
+      role: "assistant",
+      content: [{ type: "output_text", text: "Here is the answer." }],
+    });
+    expect(result.success).toBe(true);
+    const json = await result.response.json();
+    expect(json.choices?.[0]?.message?.content).toBe("Here is the answer.");
+  });
+
+  it("turns a Responses refusal into 403 for combo fallback", async () => {
+    const result = await callForced({
+      type: "message",
+      role: "assistant",
+      content: [{ type: "refusal", refusal: "I can't help with that request." }],
+    });
+    expect(result.success).toBe(false);
+    expect(result.status).toBe(403);
+    expect(result.error).toMatch(/Content filtered/);
+  });
+});
+
+describe("usage attribution", () => {
+  it("persists comboName and the original requested model", () => {
+    usageDb.saveRequestUsage.mockClear();
+    saveUsageStats({
+      provider: "codebuddy-cn",
+      model: "deepseek-v4.1-flash",
+      tokens: { prompt_tokens: 10, completion_tokens: 2 },
+      connectionId: "c1",
+      apiKey: "k",
+      endpoint: "/v1/chat/completions",
+      comboName: "my-combo",
+      requestedModel: "my-combo",
+      silent: true,
+    });
+    expect(usageDb.saveRequestUsage).toHaveBeenCalledWith(expect.objectContaining({
+      comboName: "my-combo",
+      requestedModel: "my-combo",
+    }));
   });
 });
 
