@@ -11,19 +11,20 @@
 # 用法:
 #   ./9r-deploy.sh               完整流程：install → build → 重启 → 验证
 #   ./9r-deploy.sh --skip-build  跳过构建，只重启+验证（改 plist/数据时用）
+#   NINEROUTER_VERIFY_KEY=... ./9r-deploy.sh   额外执行 new-api → 9Router 跨容器鉴权验证
 #   ./9r-deploy.sh -h            帮助
 #
 # 退出码: 0 = 全部通过; 1 = 某步失败
 # ============================================================
 set -uo pipefail
 
-NODE="$HOME/.local/bin/node"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # 仓库根（脚本就在仓库根目录）
 DATA_DIR="$HOME/.9router"
 PLIST_LABEL="com.9router.local"
 LOG="/tmp/9r-deploy-$(date +%Y%m%d-%H%M%S).log"
 DB="$DATA_DIR/db/data.sqlite"
-KEY="sk-8f45b56418ed9762-eeacsv-96a55e63"   # Default Key，仅本机验证用
+VERIFY_KEY="${NINEROUTER_VERIFY_KEY:-}"
+USER_UID="$(id -u)"
 PODMAN=/opt/homebrew/bin/podman
 
 SKIP_BUILD=0
@@ -46,7 +47,7 @@ if [ $SKIP_BUILD -eq 0 ]; then
 fi
 
 step "2/3 launchd 重启（服务中断几秒）"
-launchctl kickstart -k "gui/501/$PLIST_LABEL" || { echo "❌ kickstart 失败"; exit 1; }
+launchctl kickstart -k "gui/${USER_UID}/$PLIST_LABEL" || { echo "❌ kickstart 失败"; exit 1; }
 sleep 6
 
 step "3/3 验证"
@@ -61,16 +62,46 @@ else
 fi
 
 # 3.2 网关 API（宿主机）
-R=$(curl -s -m 8 -H "Authorization: Bearer $KEY" http://localhost:20128/v1/models | head -c 60)
+R=$(curl -s -m 8 http://localhost:20128/v1/models | head -c 60)
 echo "宿主机 /v1/models: ${R:0:60}"
 echo "$R" | grep -q '^{"object":"list"' || { echo "❌ 宿主机 API 不通"; FAIL=1; }
 
 # 3.3 new-api 容器 → 宿主机 9Router（podman 内置域名）
-if [ -x "$PODMAN" ] && "$PODMAN" ps --format '{{.Names}}' 2>/dev/null | grep -q '^new-api$'; then
-  R2=$("$PODMAN" exec new-api wget -q -O - -T 5 --header "Authorization: Bearer $KEY" \
+# 跨容器请求不是 loopback，必须显式提供验证 Key；Key 只从环境变量读取，
+# 不再写入仓库或脚本历史。
+if [ -z "$VERIFY_KEY" ]; then
+  echo "⚠️ 未设置 NINEROUTER_VERIFY_KEY，跳过 new-api → 9Router 跨容器鉴权验证"
+elif [ -x "$PODMAN" ] && "$PODMAN" ps --format '{{.Names}}' 2>/dev/null | grep -q '^new-api
+# 3.4 数据库完好 + journal 模式正确（防 WAL 回潮）
+if [ -f "$DB" ]; then
+  JM=$(/usr/bin/sqlite3 -readonly "$DB" "PRAGMA journal_mode;" 2>&1)
+  echo "journal_mode: ${JM}（应为 delete）"
+  [[ "$JM" == "delete" ]] || { echo "❌ journal_mode 不是 delete，WAL 回潮了！"; FAIL=1; }
+  QC=$(/usr/bin/sqlite3 -readonly "$DB" "PRAGMA quick_check;" 2>&1 | head -1)
+  [[ "$QC" == "ok" ]] || { echo "❌ 数据库 quick_check 异常: $QC"; FAIL=1; }
+else
+  echo "⚠️ 找不到 ${DB}，跳过 DB 验证"
+fi
+
+# 3.5 运行日志无 malformed
+OUT_LOG="$DATA_DIR/logs/9router-local.out.log"
+MAL=$(tail -100 "$OUT_LOG" 2>/dev/null | grep -c malformed || true)
+echo "近100行日志 malformed: $MAL 条"
+[ "$MAL" -eq 0 ] || { echo "❌ 仍有 malformed"; FAIL=1; }
+
+echo
+if [ $FAIL -eq 0 ]; then
+  echo "✅ 全部通过：9Router 新版本已上线（宿主机直跑），网关/跨容器/数据库均正常"
+  exit 0
+else
+  echo "❌ 有 $FAIL 项验证失败，见上方输出"
+  exit 1
+fi
+; then
+  R2=$("$PODMAN" exec new-api wget -q -O - -T 5 --header "Authorization: Bearer $VERIFY_KEY" \
         http://host.containers.internal:20128/v1/models 2>/dev/null | head -c 60)
   echo "new-api → host.containers.internal:20128: ${R2:0:60}"
-  echo "$R2" | grep -q '^{"object":"list"' || { echo "❌ new-api → 9Router 不通"; FAIL=1; }
+  echo "$R2" | grep -q '^{"object":"list"' || { echo "❌ new-api → 9Router 不通或验证 Key 无效"; FAIL=1; }
 else
   echo "⚠️ new-api 容器没在跑（或 podman 不可用），跳过跨容器验证"
 fi
