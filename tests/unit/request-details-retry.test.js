@@ -15,16 +15,21 @@ const fake = vi.hoisted(() => ({
   failCount: 0,
   maxFails: 0,
   txCalls: 0,
+  errorMessage: "SQLITE_BUSY: database is locked",
+  flushIntervalMs: 999999,
+  adapterGate: null,
 }));
 
 vi.mock("@/lib/db/driver.js", () => ({
-  getAdapter: async () => ({
+  getAdapter: async () => {
+    if (fake.adapterGate) await fake.adapterGate;
+    return {
     driver: "fake",
     transaction(fn) {
       fake.txCalls++;
       if (fake.failCount < fake.maxFails) {
         fake.failCount++;
-        throw new Error("SQLITE_BUSY: database is locked");
+        throw new Error(fake.errorMessage);
       }
       return fn();
     },
@@ -39,7 +44,8 @@ vi.mock("@/lib/db/driver.js", () => ({
     all() { return []; },
     exec() {},
     close() {},
-  }),
+    };
+  },
   getAdapterSync: () => null,
 }));
 
@@ -50,7 +56,7 @@ vi.mock("@/lib/db/repos/settingsRepo.js", () => ({
     enableObservability: true,
     observabilityBatchSize: 9999,
     observabilityMaxRecords: 200,
-    observabilityFlushIntervalMs: 999999,
+    observabilityFlushIntervalMs: fake.flushIntervalMs,
     observabilityMaxJsonSize: 5,
   }),
 }));
@@ -64,6 +70,9 @@ beforeEach(async () => {
   fake.failCount = 0;
   fake.maxFails = 0;
   fake.txCalls = 0;
+  fake.errorMessage = "SQLITE_BUSY: database is locked";
+  fake.flushIntervalMs = 999999;
+  fake.adapterGate = null;
   delete process.env.OBSERVABILITY_MAX_BUFFER_RECORDS;
   vi.resetModules();
   repo = await import("@/lib/db/repos/requestDetailsRepo.js");
@@ -107,6 +116,32 @@ describe("requestDetailsRepo — failed batch is requeued, not dropped", () => {
 
     expect(fake.rows.sort()).toEqual(["a", "b", "c"]);
   });
+
+  it("automatically retries a requeued batch even when no new request arrives", async () => {
+    vi.useFakeTimers();
+    try {
+      fake.flushIntervalMs = 50;
+      fake.errorMessage = "fatal write failure"; // non-transient → final failure immediately
+      fake.maxFails = 1;
+
+      await repo.saveRequestDetail(detail("auto-retry"));
+      // Shutdown-test helper clears the original save timer before flushing, so
+      // any later retry can only come from the final-failure requeue path.
+      await repo.__shutdownTest__.flushPendingForShutdown();
+      expect(fake.rows).toEqual([]);
+      expect(repo.__test__.getPendingBufferSize()).toBe(1);
+
+      fake.maxFails = 0;
+      fake.failCount = 0;
+      await vi.advanceTimersByTimeAsync(50);
+      await Promise.resolve();
+
+      expect(fake.rows).toEqual(["auto-retry"]);
+      expect(repo.__test__.getPendingBufferSize()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("requestDetailsRepo — bounded pending buffer", () => {
@@ -140,6 +175,31 @@ describe("requestDetailsRepo — shutdown lifecycle", () => {
     expect(fake.rows).toEqual(["shutdown-1"]);
   });
 
+  it("waits for an already in-flight flush instead of returning early", async () => {
+    let release;
+    fake.adapterGate = new Promise((resolve) => { release = resolve; });
+
+    await repo.saveRequestDetail(detail("in-flight"));
+    const firstFlush = repo.__test__.flushToDatabase();
+    await Promise.resolve();
+    expect(repo.__test__.hasActiveFlush()).toBe(true);
+
+    let shutdownDone = false;
+    const shutdownFlush = repo.__shutdownTest__.flushPendingForShutdown().then(() => {
+      shutdownDone = true;
+    });
+    await Promise.resolve();
+    expect(shutdownDone).toBe(false);
+
+    release();
+    fake.adapterGate = null;
+    await Promise.all([firstFlush, shutdownFlush]);
+
+    expect(fake.rows).toEqual(["in-flight"]);
+    expect(shutdownDone).toBe(true);
+    expect(repo.__test__.hasActiveFlush()).toBe(false);
+  });
+
   it("registers no async `exit` listener (Node would not await it)", async () => {
     const before = process.listeners("exit").length;
     vi.resetModules();
@@ -147,12 +207,17 @@ describe("requestDetailsRepo — shutdown lifecycle", () => {
     expect(process.listeners("exit").length).toBe(before);
   });
 
-  it("registers SIGINT/SIGTERM/beforeExit handlers for the flush", async () => {
+  it("registers SIGINT/SIGTERM/beforeExit handlers without stacking them on module reload", async () => {
+    const before = {
+      sigint: process.listeners("SIGINT").length,
+      sigterm: process.listeners("SIGTERM").length,
+      beforeExit: process.listeners("beforeExit").length,
+    };
     vi.resetModules();
     const fresh = await import("@/lib/db/repos/requestDetailsRepo.js");
     expect(typeof fresh.__shutdownTest__.flushPendingForShutdown).toBe("function");
-    expect(process.listeners("SIGINT").length).toBeGreaterThan(0);
-    expect(process.listeners("SIGTERM").length).toBeGreaterThan(0);
-    expect(process.listeners("beforeExit").length).toBeGreaterThan(0);
+    expect(process.listeners("SIGINT").length).toBe(before.sigint);
+    expect(process.listeners("SIGTERM").length).toBe(before.sigterm);
+    expect(process.listeners("beforeExit").length).toBe(before.beforeExit);
   });
 });
