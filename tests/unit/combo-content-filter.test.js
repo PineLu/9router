@@ -111,6 +111,19 @@ describe("contentFilter detector", () => {
     expect(isRefusalText(`content policy discussion ${"x".repeat(700)}`)).toBe(false);
   });
 
+  it("does not flag short legitimate policy/moderation explanations", () => {
+    expect(isRefusalText("A content policy defines which categories require moderation.")).toBe(false);
+    expect(isRefusalText("Sensitive content is a category used by moderation systems.")).toBe(false);
+    expect(isRefusalText("Policy violation detection should distinguish discussion from refusal.")).toBe(false);
+    expect(isRefusalText("这段代码用于检测内容违规，不代表模型拒绝回答。")).toBe(false);
+  });
+
+  it("still flags explicit policy refusals", () => {
+    expect(isRefusalText("This request violates our content policy.")).toBe(true);
+    expect(isRefusalText("I'm sorry, I can't help with this request.")).toBe(true);
+    expect(isRefusalText("抱歉，这个请求涉及敏感内容，我无法提供帮助。")).toBe(true);
+  });
+
   it("isContentFilterFinish covers hub + gemini blocked values", () => {
     expect(isContentFilterFinish("content_filter")).toBe(true);
     expect(isContentFilterFinish("SAFETY")).toBe(true);
