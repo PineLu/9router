@@ -26,7 +26,7 @@ const {
 
 const { handleNonStreamingResponse } = await import("../../open-sse/handlers/chatCore/nonStreamingHandler.js");
 const { handleForcedSSEToJson } = await import("../../open-sse/handlers/chatCore/sseToJsonHandler.js");
-const { buildOnStreamComplete } = await import("../../open-sse/handlers/chatCore/streamingHandler.js");
+const { buildOnStreamComplete, handleStreamingResponse } = await import("../../open-sse/handlers/chatCore/streamingHandler.js");
 const { saveUsageStats } = await import("../../open-sse/handlers/chatCore/requestDetail.js");
 const usageDb = await import("@/lib/usageDb.js");
 const { handleComboChat, isComboModelCooling, resetComboRotation } = await import("../../open-sse/services/combo.js");
@@ -118,6 +118,13 @@ describe("contentFilter detector", () => {
     expect(isRefusalText("这段代码用于检测内容违规，不代表模型拒绝回答。")).toBe(false);
   });
 
+  it("does not confuse ordinary inability/idiom wording with a policy refusal", () => {
+    expect(isRefusalText("I can't help but notice a race condition here.")).toBe(false);
+    expect(isRefusalText("I cannot provide an exact estimate without the logs.")).toBe(false);
+    expect(isRefusalText("I cannot answer definitively without more context.")).toBe(false);
+    expect(isRefusalText("我无法判断具体原因，需要你提供更多日志。")).toBe(false);
+  });
+
   it("still flags explicit policy refusals", () => {
     expect(isRefusalText("This request violates our content policy.")).toBe(true);
     expect(isRefusalText("I'm sorry, I can't help with this request.")).toBe(true);
@@ -192,7 +199,8 @@ describe("streaming refusal → combo failure memory for the NEXT request", () =
     resetComboRotation();
   });
 
-  it("records 2min cooling keyed combo::provider/model on content_filter finish", () => {
+  it("records 2min cooling keyed combo::provider/model on content_filter finish without marking account success", async () => {
+    const onRequestSuccess = vi.fn();
     const { onStreamComplete } = buildOnStreamComplete({
       provider: "codebuddy-cn",
       model: "deepseek-v4.1-flash",
@@ -204,13 +212,16 @@ describe("streaming refusal → combo failure memory for the NEXT request", () =
       finalBody: null,
       translatedBody: null,
       clientRawRequest: null,
+      onRequestSuccess,
       pxpipe: null,
       reqTag: "T",
       log: { line() {} },
       comboName: "my-combo",
     });
     onStreamComplete({ content: "抱歉，我无法帮助。", thinking: null }, null, Date.now(), { finishReason: "content_filter" });
+    await Promise.resolve();
     expect(isComboModelCooling("my-combo", "codebuddy-cn/deepseek-v4.1-flash")).toBe(true);
+    expect(onRequestSuccess).not.toHaveBeenCalled();
   });
 
   it("cools on finish_reason=stop when the streamed text is a refusal", () => {
@@ -234,7 +245,8 @@ describe("streaming refusal → combo failure memory for the NEXT request", () =
     expect(isComboModelCooling("my-combo", "codebuddy-cn/deepseek-v4.1-flash")).toBe(true);
   });
 
-  it("does nothing for a normal stop finish", () => {
+  it("records account success only after a normal terminal finish", async () => {
+    const onRequestSuccess = vi.fn();
     const { onStreamComplete } = buildOnStreamComplete({
       provider: "codebuddy-cn",
       model: "deepseek-v4.1-flash",
@@ -246,14 +258,64 @@ describe("streaming refusal → combo failure memory for the NEXT request", () =
       finalBody: null,
       translatedBody: null,
       clientRawRequest: null,
+      onRequestSuccess,
       pxpipe: null,
       reqTag: "T",
       log: { line() {} },
       comboName: "my-combo",
     });
     onStreamComplete({ content: "here is the code", thinking: null }, null, Date.now(), { finishReason: "stop" });
+    await Promise.resolve();
     expect(isComboModelCooling("my-combo", "codebuddy-cn/deepseek-v4.1-flash")).toBe(false);
+    expect(onRequestSuccess).toHaveBeenCalledTimes(1);
+
+    // Defensive: duplicate terminal callbacks must not clear state twice.
+    onStreamComplete({ content: "here is the code", thinking: null }, null, Date.now(), { finishReason: "stop" });
+    await Promise.resolve();
+    expect(onRequestSuccess).toHaveBeenCalledTimes(1);
   });
+
+
+  it("does not mark success when a streaming upstream returns an HTML error page", async () => {
+    const onRequestSuccess = vi.fn();
+    const streamController = { handleError: vi.fn() };
+    const result = await handleStreamingResponse({
+      providerResponse: new Response("<html><title>upstream blocked</title></html>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      }),
+      provider: "codebuddy-cn",
+      model: "deepseek-v4.1-flash",
+      sourceFormat: "openai",
+      targetFormat: "openai",
+      userAgent: "",
+      body: {},
+      stream: true,
+      translatedBody: null,
+      finalBody: null,
+      requestStartTime: Date.now(),
+      connectionId: "c1",
+      apiKey: "k",
+      clientRawRequest: null,
+      onRequestSuccess,
+      reqLogger: {},
+      toolNameMap: null,
+      customToolNames: null,
+      streamController,
+      onStreamComplete: () => {},
+      streamDetailId: "stream-test",
+      pxpipe: null,
+      reqTag: "T",
+      log: { errorLine() {} },
+      credentials: {},
+      comboName: "my-combo",
+    });
+
+    expect(result.success).toBe(false);
+    expect(onRequestSuccess).not.toHaveBeenCalled();
+    expect(streamController.handleError).toHaveBeenCalled();
+  });
+
 });
 
 describe("forced Responses SSE → JSON", () => {
