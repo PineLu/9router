@@ -312,21 +312,11 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
   responseBody = unwrapClineEnvelope(responseBody, provider);
 
   reqLogger.logProviderResponse(providerResponse.status, providerResponse.statusText, providerResponse.headers, responseBody);
-  if (onRequestSuccess) {
-    Promise.resolve()
-      .then(onRequestSuccess)
-      .catch(err => {
-        console.error("[ChatCore] onRequestSuccess failed:", err?.message || err);
-      });
-  }
 
   // Decloak tool_use names once on raw Claude body, before any translation (INPUT side)
   responseBody = decloakToolNames(responseBody, toolNameMap);
 
   const usage = extractUsageFromResponse(responseBody);
-  appendLog({ tokens: usage, status: "200 OK" });
-  saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, comboName, requestedModel: clientRawRequest?.body?.model || body?.model || null, silent: true });
-  if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
 
   const translatedResponse = needsTranslation(targetFormat, sourceFormat)
     ? translateNonStreamingResponse(responseBody, targetFormat, sourceFormat, customToolNames)
@@ -337,6 +327,11 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
   // fallback try the next model instead of serving the apology as an answer.
   // Checks the RAW upstream body (a provider-native gemini/claude body may
   // carry SAFETY) and the translated body (an OpenAI-shaped content_filter).
+  //
+  // Detect the refusal BEFORE any success accounting. Otherwise the dashboard
+  // would show "success / 200 OK" for a turn the client received as 403, and
+  // onRequestSuccess() would clear the account's cooldown/health state for a
+  // request the model actually refused.
   const refusalReason = getContentFilterRefusal(responseBody, translatedResponse);
   if (refusalReason) {
     const preview = extractRefusalPreview(responseBody, translatedResponse);
@@ -344,7 +339,11 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
       new Error(`Content filtered (${refusalReason})${preview ? `: ${preview}` : ""}`),
       provider, model, HTTP_STATUS.FORBIDDEN
     );
-    appendLog({ status: `FAILED ${HTTP_STATUS.FORBIDDEN} content_filter` });
+    // The upstream turn consumed tokens even though it refused, so usage is
+    // still recorded; only the status/health accounting reflects the failure.
+    appendLog({ tokens: usage, status: `FAILED ${HTTP_STATUS.FORBIDDEN} content_filter` });
+    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, comboName, requestedModel: clientRawRequest?.body?.model || body?.model || null, silent: true });
+    if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
     saveRequestDetail(buildRequestDetail({
       provider, model, connectionId,
       comboName: comboName || null,
@@ -361,6 +360,20 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
     reqLogger.logError(new Error(errMsg), finalBody || translatedBody);
     return createErrorResult(HTTP_STATUS.FORBIDDEN, errMsg);
   }
+
+  // Only a turn that survived the refusal check counts as an account success.
+  if (onRequestSuccess) {
+    Promise.resolve()
+      .then(onRequestSuccess)
+      .catch(err => {
+        console.error("[ChatCore] onRequestSuccess failed:", err?.message || err);
+      });
+  }
+
+  appendLog({ tokens: usage, status: "200 OK" });
+  saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, comboName, requestedModel: clientRawRequest?.body?.model || body?.model || null, silent: true });
+  if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
+
   const isClaudeMessageResponse = sourceFormat === FORMATS.CLAUDE && translatedResponse?.type === "message";
   // Responses-format translation produces a `object:"response"` body with no
   // `choices`; skip the Chat-Completions-specific post-processing below for it.

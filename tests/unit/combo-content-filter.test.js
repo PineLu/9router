@@ -371,3 +371,158 @@ describe("combo falls back on the SAME non-stream request after a refusal", () =
     expect(isComboModelCooling("refusal-combo", "cbcn/bad")).toBe(true);
   });
 });
+
+// A refusal is returned to the client as 403, so the observability records must
+// agree: no 200 OK, no status=success, and no onRequestSuccess() (which would
+// clear the account cooldown/health state for a turn the model actually
+// refused). Token usage is still persisted — the upstream turn really ran.
+describe("refusal observability matches the final HTTP result", () => {
+  function callNonStreaming(body) {
+    const providerResponse = {
+      status: 200,
+      statusText: "OK",
+      headers: new Headers({ "content-type": "application/json" }),
+      json: async () => body,
+    };
+    const onRequestSuccess = vi.fn();
+    const logged = [];
+    return handleNonStreamingResponse({
+      providerResponse,
+      provider: "codebuddy-cn",
+      model: "deepseek-v4.1-flash",
+      sourceFormat: "openai",
+      targetFormat: "openai",
+      body: { stream: false },
+      stream: false,
+      translatedBody: null,
+      finalBody: null,
+      requestStartTime: Date.now(),
+      connectionId: "c1",
+      apiKey: "k",
+      clientRawRequest: null,
+      onRequestSuccess,
+      reqLogger: { logProviderResponse() {}, logConvertedResponse() {}, logError() {} },
+      toolNameMap: null,
+      customToolNames: null,
+      trackDone: () => {},
+      appendLog: (e) => logged.push(e),
+      pxpipe: null,
+      reqTag: "T",
+      log: { line: (...a) => logged.push(a.join(" ")) },
+    }).then((r) => ({ result: r, logged, onRequestSuccess }));
+  }
+
+  it("non-stream refusal: error status, 403 logged, no onRequestSuccess, usage kept", async () => {
+    usageDb.saveRequestDetail.mockClear();
+    usageDb.saveRequestUsage.mockClear();
+    usageDb.appendRequestLog.mockClear();
+
+    const { result, logged, onRequestSuccess } = await callNonStreaming(refusalBody());
+
+    expect(result.status).toBe(403);
+    expect(onRequestSuccess).not.toHaveBeenCalled();
+
+    const detailArg = usageDb.saveRequestDetail.mock.calls.at(-1)?.[0];
+    expect(detailArg?.status).toBe("error");
+    expect(detailArg?.status).not.toBe("success");
+
+    const statuses = logged.map((e) => String(e?.status ?? e));
+    expect(statuses.some((s) => s.includes("403"))).toBe(true);
+    expect(statuses.some((s) => s === "200 OK")).toBe(false);
+
+    // Upstream consumed tokens even though it refused → usage still recorded.
+    expect(usageDb.saveRequestUsage).toHaveBeenCalled();
+  });
+
+  it("non-stream normal answer: success status, 200 logged, onRequestSuccess fired once", async () => {
+    usageDb.saveRequestDetail.mockClear();
+    usageDb.saveRequestUsage.mockClear();
+
+    const { result, logged, onRequestSuccess } = await callNonStreaming(okBody());
+
+    expect(result.success).toBe(true);
+    expect(onRequestSuccess).toHaveBeenCalledTimes(1);
+
+    const detailArg = usageDb.saveRequestDetail.mock.calls.at(-1)?.[0];
+    expect(detailArg?.status).toBe("success");
+    expect(logged.map((e) => String(e?.status ?? e))).toContain("200 OK");
+  });
+
+  function responsesSse(item, usage = { input_tokens: 10, output_tokens: 4, total_tokens: 14 }) {
+    return [
+      'event: response.created',
+      'data: {"response":{"id":"resp-obs","created_at":1700000000}}',
+      '',
+      'event: response.output_item.done',
+      `data: ${JSON.stringify({ output_index: 0, item })}`,
+      '',
+      'event: response.completed',
+      `data: ${JSON.stringify({ response: { usage } })}`,
+      '',
+      '',
+    ].join("\n");
+  }
+
+  function callForced(item) {
+    const onRequestSuccess = vi.fn();
+    const logged = [];
+    return handleForcedSSEToJson({
+      providerResponse: new Response(responsesSse(item), { headers: { "content-type": "text/event-stream" } }),
+      sourceFormat: "openai",
+      targetFormat: "openai-responses",
+      provider: "test-provider",
+      model: "test-model",
+      body: { model: "my-combo", stream: false },
+      stream: false,
+      translatedBody: null,
+      finalBody: null,
+      requestStartTime: Date.now(),
+      connectionId: "c1",
+      apiKey: "k",
+      clientRawRequest: { endpoint: "/v1/chat/completions", body: { model: "my-combo" } },
+      onRequestSuccess,
+      customToolNames: null,
+      trackDone: () => {},
+      appendLog: (e) => logged.push(e),
+      reqTag: "T",
+      log: { line: (...a) => logged.push(a.join(" ")) },
+      comboName: "my-combo",
+    }).then((r) => ({ result: r, logged, onRequestSuccess }));
+  }
+
+  it("Responses SSE→JSON refusal: 403, no onRequestSuccess, detail error, usage kept", async () => {
+    usageDb.saveRequestDetail.mockClear();
+    usageDb.saveRequestUsage.mockClear();
+
+    const { result, logged, onRequestSuccess } = await callForced({
+      type: "message",
+      role: "assistant",
+      content: [{ type: "refusal", refusal: "I can't help with that request." }],
+    });
+
+    expect(result.status).toBe(403);
+    expect(onRequestSuccess).not.toHaveBeenCalled();
+
+    const detailArg = usageDb.saveRequestDetail.mock.calls.at(-1)?.[0];
+    expect(detailArg?.status).toBe("error");
+
+    const statuses = logged.map((e) => String(e?.status ?? e));
+    expect(statuses.some((s) => s.includes("403"))).toBe(true);
+    expect(statuses.some((s) => s === "200 OK")).toBe(false);
+    expect(usageDb.saveRequestUsage).toHaveBeenCalled();
+  });
+
+  it("Responses SSE→JSON normal: success, onRequestSuccess once, detail success", async () => {
+    usageDb.saveRequestDetail.mockClear();
+
+    const { result, onRequestSuccess } = await callForced({
+      type: "message",
+      role: "assistant",
+      content: [{ type: "output_text", text: "Here is the answer." }],
+    });
+
+    expect(result.success).toBe(true);
+    expect(onRequestSuccess).toHaveBeenCalledTimes(1);
+    expect(usageDb.saveRequestDetail.mock.calls.at(-1)?.[0]?.status).toBe("success");
+  });
+});

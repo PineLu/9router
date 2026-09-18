@@ -201,12 +201,8 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
   if (isCodexResponsesApi) {
     try {
       const jsonResponse = await convertResponsesStreamToJson(providerResponse.body);
-      if (onRequestSuccess) await onRequestSuccess();
 
       const usage = jsonResponse.usage || {};
-      appendLog({ tokens: usage, status: "200 OK" });
-      saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, comboName, requestedModel: clientRawRequest?.body?.model || body?.model || null, silent: true });
-      if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
 
       // Same cache-inclusive total for the recorded detail, so the DB and the
       // client-facing usage can never disagree.
@@ -215,6 +211,39 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
         + (usage.cache_creation_input_tokens || 0);
       const { msgItem, textContent } = pickAssistantMessageForChatCompletion(jsonResponse.output);
       const totalLatency = Date.now() - requestStartTime;
+
+      // Detect the silent refusal BEFORE success accounting: the client gets a
+      // 403, so the log/detail must not record 200 OK / success, and
+      // onRequestSuccess() must not clear the account health state for a turn
+      // the model actually refused.
+      const sseRefusal = getContentFilterRefusal(jsonResponse);
+      if (sseRefusal) {
+        const preview = extractRefusalPreview(jsonResponse);
+        const sseErrMsg = formatProviderError(
+          new Error(`Content filtered (${sseRefusal})${preview ? `: ${preview}` : ""}`),
+          provider, model, HTTP_STATUS.FORBIDDEN
+        );
+        // Tokens were really consumed upstream despite the refusal.
+        appendLog({ tokens: usage, status: `FAILED ${HTTP_STATUS.FORBIDDEN} content_filter` });
+        saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, comboName, requestedModel: clientRawRequest?.body?.model || body?.model || null, silent: true });
+        if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: totalLatency } }));
+        saveRequestDetail(buildRequestDetail({
+          ...ctx,
+          comboName: comboName || null,
+          requestedModel: clientRawRequest?.body?.model || body?.model || null,
+          latency: { ttft: totalLatency, total: totalLatency },
+          tokens: { prompt_tokens: inTokensForLog, completion_tokens: usage.output_tokens || 0 },
+          response: { error: sseErrMsg, status: HTTP_STATUS.FORBIDDEN, content: textContent, thinking: null, finish_reason: jsonResponse.status || "unknown" },
+          status: "error"
+        }, { endpoint: clientRawRequest?.endpoint || null })).catch(() => {});
+        return createErrorResult(HTTP_STATUS.FORBIDDEN, sseErrMsg);
+      }
+
+      if (onRequestSuccess) await onRequestSuccess();
+
+      appendLog({ tokens: usage, status: "200 OK" });
+      saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, comboName, requestedModel: clientRawRequest?.body?.model || body?.model || null, silent: true });
+      if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
 
       saveRequestDetail(buildRequestDetail({
         ...ctx,
@@ -225,18 +254,6 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
         response: { content: textContent, thinking: null, finish_reason: jsonResponse.status || "unknown" },
         status: "success"
       }, { endpoint: clientRawRequest?.endpoint || null })).catch(() => {});
-
-      // Silent refusal in a Responses API body: fail the turn for combo fallback.
-      const sseRefusal = getContentFilterRefusal(jsonResponse);
-      if (sseRefusal) {
-        const preview = extractRefusalPreview(jsonResponse);
-        const sseErrMsg = formatProviderError(
-          new Error(`Content filtered (${sseRefusal})${preview ? `: ${preview}` : ""}`),
-          provider, model, HTTP_STATUS.FORBIDDEN
-        );
-        appendLog({ status: `FAILED ${HTTP_STATUS.FORBIDDEN} content_filter` });
-        return createErrorResult(HTTP_STATUS.FORBIDDEN, sseErrMsg);
-      }
 
       // Client is Responses API → return as-is
       if (sourceFormat === FORMATS.OPENAI_RESPONSES) {
@@ -315,27 +332,7 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
       );
     }
 
-    if (onRequestSuccess) await onRequestSuccess();
-
     const usage = parsed.usage || {};
-    appendLog({ tokens: usage, status: "200 OK" });
-    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, comboName, requestedModel: clientRawRequest?.body?.model || body?.model || null, silent: true });
-    if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
-
-    const totalLatency = Date.now() - requestStartTime;
-    saveRequestDetail(buildRequestDetail({
-      ...ctx,
-      comboName: comboName || null,
-      requestedModel: clientRawRequest?.body?.model || body?.model || null,
-      latency: { ttft: totalLatency, total: totalLatency },
-      tokens: usage,
-      response: {
-        content: parsed.choices?.[0]?.message?.content || null,
-        thinking: parsed.choices?.[0]?.message?.reasoning_content || null,
-        finish_reason: parsed.choices?.[0]?.finish_reason || "unknown"
-      },
-      status: "success"
-    }, { endpoint: clientRawRequest?.endpoint || null })).catch(() => {});
 
     // Re-attach usage explicitly. This handler already HAS the correct usage — it is
     // the same object written to the usage DB, and for a cached Claude request that DB
@@ -358,7 +355,9 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
       }
     }
 
-    // (Same silent-refusal check as the Responses-API branch above.)
+    // (Same silent-refusal check as the Responses-API branch above.) Detected
+    // before any success accounting so the log/detail match the 403 the client
+    // receives, and onRequestSuccess() is not fired for a refused turn.
     const stdRefusal = getContentFilterRefusal(parsed);
     if (stdRefusal) {
       const preview = extractRefusalPreview(parsed);
@@ -366,9 +365,49 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
         new Error(`Content filtered (${stdRefusal})${preview ? `: ${preview}` : ""}`),
         provider, model, HTTP_STATUS.FORBIDDEN
       );
-      appendLog({ status: `FAILED ${HTTP_STATUS.FORBIDDEN} content_filter` });
+      // Tokens were really consumed upstream despite the refusal.
+      appendLog({ tokens: usage, status: `FAILED ${HTTP_STATUS.FORBIDDEN} content_filter` });
+      saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, comboName, requestedModel: clientRawRequest?.body?.model || body?.model || null, silent: true });
+      if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
+      const refusalLatency = Date.now() - requestStartTime;
+      saveRequestDetail(buildRequestDetail({
+        ...ctx,
+        comboName: comboName || null,
+        requestedModel: clientRawRequest?.body?.model || body?.model || null,
+        latency: { ttft: refusalLatency, total: refusalLatency },
+        tokens: usage,
+        response: {
+          error: stdErrMsg,
+          status: HTTP_STATUS.FORBIDDEN,
+          content: parsed.choices?.[0]?.message?.content || null,
+          thinking: parsed.choices?.[0]?.message?.reasoning_content || null,
+          finish_reason: parsed.choices?.[0]?.finish_reason || "unknown"
+        },
+        status: "error"
+      }, { endpoint: clientRawRequest?.endpoint || null })).catch(() => {});
       return createErrorResult(HTTP_STATUS.FORBIDDEN, stdErrMsg);
     }
+
+    if (onRequestSuccess) await onRequestSuccess();
+
+    appendLog({ tokens: usage, status: "200 OK" });
+    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, comboName, requestedModel: clientRawRequest?.body?.model || body?.model || null, silent: true });
+    if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
+
+    const totalLatency = Date.now() - requestStartTime;
+    saveRequestDetail(buildRequestDetail({
+      ...ctx,
+      comboName: comboName || null,
+      requestedModel: clientRawRequest?.body?.model || body?.model || null,
+      latency: { ttft: totalLatency, total: totalLatency },
+      tokens: usage,
+      response: {
+        content: parsed.choices?.[0]?.message?.content || null,
+        thinking: parsed.choices?.[0]?.message?.reasoning_content || null,
+        finish_reason: parsed.choices?.[0]?.finish_reason || "unknown"
+      },
+      status: "success"
+    }, { endpoint: clientRawRequest?.endpoint || null })).catch(() => {});
 
     // A Responses-format client (e.g. Codex) forced this provider to stream,
     // but wants JSON back. parseSSEToOpenAIResponse yields a Chat Completions
