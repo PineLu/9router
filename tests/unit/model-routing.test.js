@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { resetDbAdapterForTests } from "../helpers/resetDbAdapter.js";
 
 const originalDataDir = process.env.DATA_DIR;
 
@@ -17,6 +18,10 @@ async function setupDb() {
     createProviderNode,
     getModelInfo,
     cleanup() {
+      // Close the cached adapter BEFORE deleting its DATA_DIR: an adapter left
+      // open across the delete makes the next DELETE-journal write fail with
+      // "attempt to write a readonly database" (see tests/helpers/resetDbAdapter.js).
+      resetDbAdapterForTests();
       fs.rmSync(tempDir, { recursive: true, force: true });
     },
   };
