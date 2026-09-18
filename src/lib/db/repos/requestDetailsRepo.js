@@ -10,6 +10,8 @@ const CONFIG_CACHE_TTL_MS = 5000;
 // requeued (never silently dropped), so without a cap a permanently-broken DB
 // would grow the buffer without bound. Oldest records are dropped on overflow.
 const DEFAULT_MAX_BUFFER_RECORDS = 1000;
+// Bounded wait for the final flush during SIGINT/SIGTERM.
+const SHUTDOWN_FLUSH_TIMEOUT_MS = 3000;
 
 let cachedConfig = null;
 let cachedConfigTs = 0;
@@ -281,21 +283,60 @@ export async function getRequestDetailById(id) {
   return row ? parseJson(row.data, null) : null;
 }
 
-const _shutdownHandler = async () => {
+// ---------------------------------------------------------------------------
+// Shutdown lifecycle
+//
+// `process.on("exit", handler)` CANNOT run async work — Node does not await the
+// promise, so an async flush registered there only *looks* safe. beforeExit can
+// run async work, but it is not emitted on SIGINT/SIGTERM. Signals therefore
+// get their own bounded graceful flush below.
+// ---------------------------------------------------------------------------
+
+let shuttingDown = false;
+
+async function flushPendingForShutdown() {
   if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
   if (writeBuffer.length > 0) await flushToDatabase();
-};
+}
+
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
+  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+
+  try {
+    await Promise.race([
+      flushToDatabase(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("request detail flush timeout")), SHUTDOWN_FLUSH_TIMEOUT_MS)
+      ),
+    ]);
+  } catch (e) {
+    console.error(`[requestDetailsRepo] ${signal} flush failed:`, e);
+  }
+
+  process.exit(0);
+}
+
+const _beforeExitHandler = async () => { await flushPendingForShutdown(); };
+const _sigintHandler = () => { void gracefulShutdown("SIGINT"); };
+const _sigtermHandler = () => { void gracefulShutdown("SIGTERM"); };
 
 function ensureShutdownHandler() {
-  process.off("beforeExit", _shutdownHandler);
-  process.off("SIGINT", _shutdownHandler);
-  process.off("SIGTERM", _shutdownHandler);
-  process.off("exit", _shutdownHandler);
+  // Re-register on module reload (hot reload) without stacking duplicate listeners.
+  process.off("beforeExit", _beforeExitHandler);
+  process.off("SIGINT", _sigintHandler);
+  process.off("SIGTERM", _sigtermHandler);
 
-  process.on("beforeExit", _shutdownHandler);
-  process.on("SIGINT", _shutdownHandler);
-  process.on("SIGTERM", _shutdownHandler);
-  process.on("exit", _shutdownHandler);
+  process.on("beforeExit", _beforeExitHandler);
+  process.on("SIGINT", _sigintHandler);
+  process.on("SIGTERM", _sigtermHandler);
 }
+
+// Test-only surface. Deliberately excludes gracefulShutdown(): it calls
+// process.exit(0), which would tear down the test runner. Tests drive the
+// flush through flushPendingForShutdown() instead.
+export const __shutdownTest__ = { flushPendingForShutdown, _beforeExitHandler };
 
 ensureShutdownHandler();

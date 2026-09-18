@@ -1,8 +1,9 @@
 // Bun runtime adapter — uses built-in bun:sqlite (native, fastest under Bun).
 // Loaded only when process.versions.bun is present.
+//
+// Database runs in rollback-journal DELETE mode. Do not reintroduce WAL here;
+// see schema.js. There is no WAL file to checkpoint.
 import { PRAGMA_SQL } from "../schema.js";
-
-const CHECKPOINT_INTERVAL_MS = 60 * 1000;
 
 export async function createBunSqliteAdapter(filePath) {
   // Dynamic import — only resolves under Bun runtime
@@ -20,20 +21,18 @@ export async function createBunSqliteAdapter(filePath) {
     return stmt;
   }
 
-  const checkpointTimer = setInterval(() => {
-    try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch {}
-  }, CHECKPOINT_INTERVAL_MS);
-  if (typeof checkpointTimer.unref === "function") checkpointTimer.unref();
-
   function gracefulClose() {
-    try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch {}
     try { stmtCache.clear(); } catch {}
     try { db.close(); } catch {}
   }
+  // Close the handle on shutdown, but do NOT exit the process: the app owns the
+  // shutdown sequence (requestDetailsRepo flushes pending rows on SIGINT/SIGTERM
+  // and exits itself). Calling process.exit() here would kill the process before
+  // that async flush could finish.
   const onShutdown = () => gracefulClose();
   process.once("beforeExit", onShutdown);
-  process.once("SIGINT", () => { onShutdown(); process.exit(0); });
-  process.once("SIGTERM", () => { onShutdown(); process.exit(0); });
+  process.once("SIGINT", onShutdown);
+  process.once("SIGTERM", onShutdown);
 
   return {
     driver: "bun:sqlite",
@@ -53,11 +52,7 @@ export async function createBunSqliteAdapter(filePath) {
       const tx = db.transaction(fn);
       return tx();
     },
-    checkpoint() { try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch {} },
-    close() {
-      clearInterval(checkpointTimer);
-      gracefulClose();
-    },
+    close() { gracefulClose(); },
     raw: db,
   };
 }
