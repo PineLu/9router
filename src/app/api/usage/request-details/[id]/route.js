@@ -5,8 +5,9 @@ import { getRequestDetailById } from "@/lib/usageDb";
  * GET /api/usage/request-details/[id]
  * Returns the full stored request detail (request/response bodies included)
  * for the dashboard drill-down drawer. The list endpoint redacts bodies;
- * this single-record endpoint restores them. Same dashboard auth as the
- * list route (enforced upstream by dashboardGuard).
+ * this single-record endpoint restores them. Because it exposes full prompt
+ * and response bodies, dashboardGuard always requires a JWT/CLI token here,
+ * even when passwordless dashboard access is enabled for the redacted list.
  */
 export async function GET(request, { params }) {
   try {
