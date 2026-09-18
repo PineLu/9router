@@ -45,6 +45,10 @@ const ALWAYS_PROTECTED = [
   "/api/version/update",
   "/api/oauth/cursor/auto-import",
   "/api/oauth/kiro/auto-import",
+  // Full request/response bodies are sensitive even when the dashboard itself
+  // is configured for passwordless access. Keep the redacted list endpoint
+  // under normal /api auth rules; only individual detail rows are always protected.
+  "/api/usage/request-details/",
 ];
 
 // Require auth, but allow through if requireLogin is disabled
