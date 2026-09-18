@@ -205,7 +205,7 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
 
       const usage = jsonResponse.usage || {};
       appendLog({ tokens: usage, status: "200 OK" });
-      saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, silent: true });
+      saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, comboName, requestedModel: clientRawRequest?.body?.model || body?.model || null, silent: true });
       if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
 
       // Same cache-inclusive total for the recorded detail, so the DB and the
@@ -219,18 +219,17 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
       saveRequestDetail(buildRequestDetail({
         ...ctx,
         comboName: comboName || null,
-        requestedModel: body?.model || null,
+        requestedModel: clientRawRequest?.body?.model || body?.model || null,
         latency: { ttft: totalLatency, total: totalLatency },
         tokens: { prompt_tokens: inTokensForLog, completion_tokens: usage.output_tokens || 0 },
         response: { content: textContent, thinking: null, finish_reason: jsonResponse.status || "unknown" },
         status: "success"
       }, { endpoint: clientRawRequest?.endpoint || null })).catch(() => {});
 
-      // Silent refusal in the Chat Completions SSE path (same as the JSON
-      // path in nonStreamingHandler.js): fail the turn for combo fallback.
-      const sseRefusal = getContentFilterRefusal(parsed);
+      // Silent refusal in a Responses API body: fail the turn for combo fallback.
+      const sseRefusal = getContentFilterRefusal(jsonResponse);
       if (sseRefusal) {
-        const preview = extractRefusalPreview(parsed);
+        const preview = extractRefusalPreview(jsonResponse);
         const sseErrMsg = formatProviderError(
           new Error(`Content filtered (${sseRefusal})${preview ? `: ${preview}` : ""}`),
           provider, model, HTTP_STATUS.FORBIDDEN
@@ -320,14 +319,14 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
 
     const usage = parsed.usage || {};
     appendLog({ tokens: usage, status: "200 OK" });
-    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, silent: true });
+    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, comboName, requestedModel: clientRawRequest?.body?.model || body?.model || null, silent: true });
     if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
 
     const totalLatency = Date.now() - requestStartTime;
     saveRequestDetail(buildRequestDetail({
       ...ctx,
       comboName: comboName || null,
-      requestedModel: body?.model || null,
+      requestedModel: clientRawRequest?.body?.model || body?.model || null,
       latency: { ttft: totalLatency, total: totalLatency },
       tokens: usage,
       response: {
