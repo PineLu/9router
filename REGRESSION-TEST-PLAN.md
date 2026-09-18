@@ -16,7 +16,7 @@
 6. Streaming `finish_reason=stop` + 拒答文本的 cooling。
 7. content-filter 短文本误判回归。
 8. `/api/usage/request-details/[id]` 强制鉴权。
-9. `9r-deploy.sh` 不再包含明文 Key，launchd UID 动态获取。
+9. `9r-deploy.sh` 保留默认验证 Key、支持环境变量覆盖，并将 launchd UID 改为动态获取。
 10. OpenCode session 相关既有回归，避免本分支其他改动被破坏。
 
 ## 2. 前置准备
@@ -134,23 +134,14 @@ else
 fi
 ```
 
-检查当前文件没有硬编码 API Key：
+确认默认验证 Key 仍保留，同时支持环境变量覆盖：
 
 ```bash
-if grep -nE 'KEY=.*sk-|Bearer sk-' 9r-deploy.sh; then
-  echo "FAIL: 当前脚本仍包含疑似明文 Key"
-else
-  echo "PASS: 当前脚本无明文 Key"
-fi
-```
-
-确认环境变量入口存在：
-
-```bash
+grep -n 'VERIFY_KEY="${NINEROUTER_VERIFY_KEY:-sk-' 9r-deploy.sh
 grep -n 'NINEROUTER_VERIFY_KEY' 9r-deploy.sh
 ```
 
-> 注意：旧 Key 曾进入 Git 历史。当前文件删除明文并不能撤销历史泄露。如果该 Key 仍有效，应在 9Router 中废弃/轮换旧 Key。
+预期：两条命令都能命中。默认 Key 是当前部署约定的一部分，本轮不删除；`NINEROUTER_VERIFY_KEY` 仅用于临时覆盖。
 
 ## 7. 第五阶段：全新数据库验证（安全，不碰正式库）
 
@@ -338,13 +329,13 @@ curl -sS -o /tmp/9r-list.out -w '%{http_code}\n' \
 
 这一步会重启正式 launchd 服务，只在前面全部通过后执行。
 
-不做跨容器鉴权验证：
+使用脚本内默认验证 Key：
 
 ```bash
 ./9r-deploy.sh --skip-build
 ```
 
-如要同时验证 `new-api → 9Router`：
+如需临时使用其他 Key 验证：
 
 ```bash
 NINEROUTER_VERIFY_KEY="$TEST_API_KEY" ./9r-deploy.sh --skip-build
@@ -356,8 +347,8 @@ NINEROUTER_VERIFY_KEY="$TEST_API_KEY" ./9r-deploy.sh --skip-build
 
 - launchd 服务正在运行。
 - 宿主机 `/v1/models` 正常。
-- 设置 `NINEROUTER_VERIFY_KEY` 时，new-api → host.containers.internal 正常。
-- 未设置环境变量时，只跳过跨容器鉴权，不报 Key 缺失错误。
+- new-api 容器存在时，默认 Key 可完成 new-api → host.containers.internal 鉴权验证。
+- 设置 `NINEROUTER_VERIFY_KEY` 时，可覆盖默认 Key 且验证仍正常。
 - journal mode 为 `delete`。
 - SQLite `quick_check = ok`。
 - 最近日志无 `malformed`。
@@ -387,7 +378,7 @@ NINEROUTER_VERIFY_KEY="$TEST_API_KEY" ./9r-deploy.sh --skip-build
 - [ ] 全量 unit 全 PASS
 - [ ] `npm run build` PASS
 - [ ] `bash -n 9r-deploy.sh` PASS
-- [ ] 当前部署脚本无明文 Key / 无 UID 501
+- [ ] 当前部署脚本保留默认验证 Key、支持环境变量覆盖，且无 UID 501
 - [ ] 临时 DATA_DIR 新库包含 `usageHistory.requestedModel`
 - [ ] `backupSchemaVersion = 2`
 - [ ] SQLite `quick_check = ok`
