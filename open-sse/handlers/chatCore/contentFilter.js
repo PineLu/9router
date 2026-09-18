@@ -18,23 +18,24 @@ const GEMINI_BLOCKED = new Set([
   GEMINI_FINISH.PROHIBITED_CONTENT,
 ]);
 
-// Apology-text fallback for providers that refuse with finish_reason=stop but
-// a refusal body. Deliberately tight + length-guarded (see below): a false
-// positive only costs one fallback + 2min cooling, but we still avoid matching
-// long-form answers that merely discuss policy.
+// Text fallback for providers that refuse with finish_reason=stop. Match
+// refusal semantics, not policy vocabulary alone: legitimate short answers
+// often discuss "content policy", "sensitive content", or moderation.
 const REFUSAL_TEXT_PATTERNS = [
-  /content\s*(policy|filter|moderation)/i,
-  /sensitive content/i,
-  /policy violation/i,
-  /violates?\s+(our|the|content)\s+polic/i,
-  /unable to (help|assist|comply)/i,
-  /sorry.{0,40}can['’]t help/i,
-  /cannot (help|assist|comply) with (this|that|your)/i,
-  /违反.{0,10}(内容|政策|规定|社区|使用)/,
-  /内容.{0,10}(违规|敏感|不合规)/,
-  /抱歉.{0,20}(无法|不能)/,
-  /我无法.{0,20}(帮助|回答|提供|协助|满足)/,
-  /涉及.{0,10}(敏感|违规)/,
+  // Direct inability / refusal language.
+  /\b(?:i\s+)?(?:cannot|can['’]t|am unable to|won['’]t|will not)\s+(?:help|assist|comply|provide|answer|continue)\b/i,
+  /\bunable to\s+(?:help|assist|comply|provide|answer|continue)\b/i,
+  /\bsorry\b.{0,60}\b(?:cannot|can['’]t|unable|won['’]t|will not)\b/i,
+
+  // Explicit statement that THIS request/prompt/content violates a rule.
+  /\b(?:this|that|your|the)\s+(?:request|prompt|content)\b.{0,50}\bviolates?\b.{0,40}\b(?:policy|policies|guidelines|rules)\b/i,
+  /\b(?:policy|safety|guidelines?)\b.{0,40}\b(?:prevents?|prohibits?|does not allow)\b.{0,40}\b(?:help|assist|comply|provide|answer|continue)\b/i,
+
+  // Chinese direct refusal / explicit request-policy violation.
+  /抱歉.{0,30}(无法|不能|不便|拒绝)/,
+  /(我|本助手|模型).{0,10}(无法|不能).{0,30}(帮助|回答|提供|协助|满足|处理)/,
+  /(这个|该|您的|你的)?(请求|内容|问题).{0,20}(违反|不符合).{0,20}(政策|规定|规范|准则)/,
+  /(基于|由于).{0,20}(安全|政策|规定).{0,30}(无法|不能|拒绝)/,
 ];
 
 // Refusal texts are short apologies; cap the text-pattern match so a long
