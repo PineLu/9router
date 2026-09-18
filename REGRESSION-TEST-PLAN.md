@@ -58,7 +58,8 @@ npm test -- \
   unit/combo-health-fallback.test.js \
   unit/combo-content-filter.test.js \
   unit/dashboard-guard.test.js \
-  unit/opencode-session.test.js
+  unit/opencode-session.test.js \
+  unit/request-details-retry.test.js
 ```
 
 ### 通过标准
@@ -74,6 +75,10 @@ npm test -- \
 - streaming `finish_reason=stop` + 明确拒答文本进入 cooling。
 - streaming 正常 `stop` 不进入 cooling。
 - 短文本 `content policy / sensitive content / policy violation / 内容违规` 的正常讨论不被误判。
+- 普通语义如 `I can't help but notice...`、`I cannot provide an exact estimate without logs`、`我无法判断具体原因...` 不被当成政策拒答。
+- Request Detail 最终写失败会 requeue，并在没有新请求时自动定时重试。
+- shutdown 会等待已经在进行的 Request Detail flush，不会把 in-flight flush 当成完成。
+- 模块 reload 不会重复堆叠 SIGINT/SIGTERM/beforeExit listener。
 - `comboName/requestedModel` 会传入 `saveRequestUsage`。
 - `requireLogin=false` 时 request-detail 列表仍可按原规则访问。
 - `requireLogin=false` 时单条完整 request detail 无 token 必须 401。
@@ -91,9 +96,14 @@ npm test -- --config ./vitest.config.js unit
 
 ### 通过标准
 
-- unit 测试 0 failed。
+仓库 master 当前存在历史 unit baseline failure，因此这里不要求“全量 0 failed”。正确验收方式是与 merge-base/master 做失败集合差集：
+
+- branch-only 新增失败必须为 0。
+- 已知历史 baseline 失败可以继续存在，但不得新增本分支独有失败。
 - 不出现新的 unhandled rejection / uncaught exception。
 - 不出现新增的 SQLite schema 错误。
+
+本分支上一轮已验证：master baseline 90 failed，branch 89 failed，branch-only regression = 0。后续以“branch-only regression = 0”为硬标准，不依赖固定失败数量。
 
 完成后回仓库根目录：
 
@@ -369,13 +379,18 @@ NINEROUTER_VERIFY_KEY="$TEST_API_KEY" ./9r-deploy.sh --skip-build
 | Responses provider + client `stream=false` | 正常 JSON，不 502 |
 | Responses 明确 refusal | 返回 403 供 Combo fallback |
 | OpenCode free/session | session ID/UA 行为与修改前一致 |
+| Request Detail DB 临时失败后恢复 | requeue 后无需新请求也会按 timer 自动重试并落库 |
+| SIGTERM/SIGINT during flush | shutdown 等待在途 flush，DB 不会提前 close |
+| Streaming HTTP 200 + HTML 错误页 | 返回 error，不能触发 onRequestSuccess |
+| Streaming 正常终止 | 只在正常 terminal event 后触发一次 onRequestSuccess |
+| Ambiguous refusal wording | `can't help but notice` / 信息不足类回答不能触发 403/cooling |
 
 ## 13. 最终验收标准
 
 以下全部满足才建议合入 master：
 
 - [ ] 定向 Vitest 全 PASS
-- [ ] 全量 unit 全 PASS
+- [ ] 全量 unit 与 master baseline 做差集，branch-only regression = 0
 - [ ] `npm run build` PASS
 - [ ] `bash -n 9r-deploy.sh` PASS
 - [ ] 当前部署脚本保留默认验证 Key、支持环境变量覆盖，且无 UID 501
@@ -385,7 +400,8 @@ NINEROUTER_VERIFY_KEY="$TEST_API_KEY" ./9r-deploy.sh --skip-build
 - [ ] journal mode = `delete`
 - [ ] 实际 Combo 请求 `comboName/requestedModel` 正确
 - [ ] Request Detail 强制鉴权符合预期
-- [ ] content-filter 无已知短文本误判
+- [ ] content-filter 无已知短文本/普通 inability wording 误判
+- [ ] Request Detail requeue 自动重试与 shutdown single-flight 测试通过
 - [ ] 实际部署 smoke PASS
 
 ## 14. 失败时请保留的信息
