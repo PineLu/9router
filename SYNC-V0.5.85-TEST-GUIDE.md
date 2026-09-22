@@ -40,11 +40,21 @@ git rev-parse HEAD
 git log --graph --oneline --decorate -8
 ```
 
-Expected HEAD:
+The code merge candidate is:
 
 ```text
 844ab841ffe4c8ef243593da4e50b26f64aa99b7
 ```
+
+The staging branch may have documentation-only commits after that merge candidate.
+Verify the merge candidate is an ancestor of HEAD:
+
+```bash
+git merge-base --is-ancestor 844ab841ffe4c8ef243593da4e50b26f64aa99b7 HEAD
+echo $?
+```
+
+Expected exit code: `0`.
 
 Working tree must be clean.
 
@@ -566,7 +576,7 @@ Return:
 
 All must pass before merging staging into `feat/combo-health-fallback`:
 
-- staging HEAD exactly matches the requested merge candidate
+- merge candidate `844ab841ffe4c8ef243593da4e50b26f64aa99b7` is an ancestor of staging HEAD
 - both merge parents are ancestors
 - targeted upstream tests: 0 failed
 - fork core tests: 0 failed
