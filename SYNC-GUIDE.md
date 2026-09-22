@@ -39,8 +39,8 @@ upstream  git@github.com:decolua/9router.git     # 上游官方
 
 | 分支 | 用途 |
 |---|---|
-| `master` | 跟踪上游，保持干净（当前 `17c4cc76`，与 upstream/master 一致） |
-| `feat/combo-health-fallback` | 开发分支，所有魔改都在这里（领先 master 27 个提交） |
+| `master` | 跟踪上游，保持干净（当前 `21583c03` / v0.5.85，与 upstream/master 一致） |
+| `feat/combo-health-fallback` | 开发分支，所有魔改都在这里（领先提交数用 `git rev-list --count master..feat/combo-health-fallback` 动态查询） |
 
 > ⚠️ **开发分支不合并回 master**（自用分支，见 §6 说明）。
 
@@ -94,7 +94,7 @@ git merge upstream/master
 
 如果出现冲突，需要手动解决（见第 4 节）。
 
-> **建议**：上游更新频繁时，可先建一个临时同步分支（如 `sync-upstream-0916`）合并上游，
+> **建议**：上游更新频繁时，可先建一个临时同步分支（如 `sync-upstream-0922-v0.5.85`）合并上游，
 > 解决完冲突再合入开发分支，避免直接污染开发分支历史。
 
 ### 3.3 推送到 Fork
@@ -132,6 +132,30 @@ cd ~/tujia_workspace/9router
 - `feat(xiaomi-mimo): merge MiMo Desktop support into xiaomi-mimo as dual auth`
 
 > 本次同步的冲突与解决方式在此记录（尚未执行同步，待补充）。
+
+### 4.1.1 2026-09-22 同步记录（v0.5.81 → v0.5.85）
+
+- 上游：`a8c9d380` → `21583c03`
+- 新增：37 commits / 135 files
+- 临时分支：`sync-upstream-0922-v0.5.85`
+- 核心双父 merge：`844ab841`
+- 同步后修复：`0674530d`（恢复 `sseToJsonHandler.js` 的 content-filter import）
+- 与 fork 自定义改动重叠：8 files
+- 重点融合：
+  - `chatCore.js` / `nonStreamingHandler.js` / `sseToJsonHandler.js`：保留 `comboName/requestedModel`、refusal 语义，同时接入 OpenCode fingerprint、Qoder status 等上游改动
+  - `combos/page.js`：保留 cooling banner，同时接入 presets / bulk / capability 聚合
+  - `usageRepo.js` / `UsageStats.js` / `OverviewCards.js`：保留 attribution/Health，同时接入 All Time、Requests、provider/model breakdown 和 2-day lastUsed 优化
+- 验证结果：
+  - v0.5.85 upstream-targeted：216 passed / 0 failed
+  - fork core：79 passed / 0 failed
+  - DB reliability：5/5 PASS
+  - merged-file focused：91 passed / 0 failed
+  - full unit：sync 78 failed vs master 79 failed
+  - NEW REGRESSIONS = 0；FIXED = 1
+  - build EXIT=0；`9r-deploy.sh` syntax PASS
+  - 部署后 DB：`quick_check=ok` / `journal_mode=delete` / `backupSchemaVersion=2`
+  - deployment smoke PASS
+- CodeBuddy `403 / code=11140 / modelLock 120s` 未混入本次同步，仍作为独立后续问题。
 
 ### 4.2 高频冲突文件预判
 
@@ -226,7 +250,7 @@ cd ~/tujia_workspace/9router
 launchctl list | grep com.9router.local
 
 # 重启（服务中断几秒）
-launchctl kickstart -k gui/501/com.9router.local
+launchctl kickstart -k "gui/$(id -u)/com.9router.local"
 
 # 停止
 launchctl unload ~/Library/LaunchAgents/com.9router.local.plist
@@ -253,9 +277,9 @@ npm run build
 
 **分支名：** `feat/combo-health-fallback`
 
-**基于：** upstream/master (2026-09-16) + 自定义魔改
+**基于：** upstream/master `21583c03` / v0.5.85 (2026-09-22) + 自定义魔改
 
-**领先 master：** 27 个提交
+**领先 master：** 动态查询：`git rev-list --count master..feat/combo-health-fallback`
 
 ### 6.1 核心功能
 
@@ -366,7 +390,7 @@ git push origin feat/combo-health-fallback
 ./9r-deploy.sh --skip-build     # 只重启+验证
 
 # ========== 服务管理 ==========
-launchctl kickstart -k gui/501/com.9router.local    # 重启
+launchctl kickstart -k "gui/$(id -u)/com.9router.local"    # 重启
 launchctl list | grep com.9router.local             # 状态
 launchctl unload ~/Library/LaunchAgents/com.9router.local.plist   # 停
 
