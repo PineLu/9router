@@ -66,8 +66,21 @@ describe("CodeBuddy request-scoped safety 403", () => {
     const result = await markAccountUnavailable(
       "account-1",
       403,
-      CODEBUDDY_SAFETY_403,
+      `[403]: ${CODEBUDDY_SAFETY_403}`,
       "codebuddy-intl",
+      "deepseek-v4.1-flash",
+    );
+
+    expect(result).toEqual({ shouldFallback: false, cooldownMs: 0 });
+    expect(mocks.updateProviderConnection).not.toHaveBeenCalled();
+  });
+
+  it("recognizes the cbai short alias without persisting a lock", async () => {
+    const result = await markAccountUnavailable(
+      "account-1",
+      403,
+      `[403]: ${CODEBUDDY_SAFETY_403}`,
+      "cbai",
       "deepseek-v4.1-flash",
     );
 
