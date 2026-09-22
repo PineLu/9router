@@ -263,7 +263,7 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
     // ("Try again in Nm" in errorText or ISO timestamp), capped at 30min.
     // Same policy as combo-level recordComboFailure.
     const retryAfterIso = resetsAtMs && resetsAtMs > Date.now() ? new Date(resetsAtMs).toISOString() : null;
-    ({ shouldFallback, cooldownMs, newBackoffLevel } = checkFallbackError(status, errorText, backoffLevel, retryAfterIso));
+    ({ shouldFallback, cooldownMs, newBackoffLevel } = checkFallbackError(status, errorText, backoffLevel, retryAfterIso, provider));
   }
   if (!shouldFallback) return { shouldFallback: false, cooldownMs: 0 };
 
