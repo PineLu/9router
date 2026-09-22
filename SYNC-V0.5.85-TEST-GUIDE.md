@@ -6,13 +6,21 @@ Target staging branch:
 sync-upstream-0922-v0.5.85
 ```
 
-Target merge commit:
+Merge foundation:
 
 ```text
 844ab841ffe4c8ef243593da4e50b26f64aa99b7
 ```
 
-Parents:
+Post-merge code repair candidate:
+
+```text
+0674530df59c4bc63d3a9a373010091dd08e1c7a
+```
+
+The staging branch may contain documentation-only commits after the code repair candidate.
+
+Merge parents:
 
 ```text
 6ccf3fb8b76918af91d53fec815272f515a1d80a   fork/custom branch before sync
@@ -40,21 +48,17 @@ git rev-parse HEAD
 git log --graph --oneline --decorate -8
 ```
 
-The code merge candidate is:
-
-```text
-844ab841ffe4c8ef243593da4e50b26f64aa99b7
-```
-
-The staging branch may have documentation-only commits after that merge candidate.
-Verify the merge candidate is an ancestor of HEAD:
+The merge foundation and repaired code candidate must both be ancestors of HEAD:
 
 ```bash
 git merge-base --is-ancestor 844ab841ffe4c8ef243593da4e50b26f64aa99b7 HEAD
-echo $?
+echo "merge foundation=$?"
+
+git merge-base --is-ancestor 0674530df59c4bc63d3a9a373010091dd08e1c7a HEAD
+echo "code repair candidate=$?"
 ```
 
-Expected exit code: `0`.
+Expected exit codes: both `0`.
 
 Working tree must be clean.
 
@@ -615,7 +619,7 @@ Return:
 
 All must pass before merging staging into `feat/combo-health-fallback`:
 
-- merge candidate `844ab841ffe4c8ef243593da4e50b26f64aa99b7` is an ancestor of staging HEAD
+- merge foundation `844ab841ffe4c8ef243593da4e50b26f64aa99b7` and repaired code candidate `0674530df59c4bc63d3a9a373010091dd08e1c7a` are ancestors of staging HEAD
 - both merge parents are ancestors
 - targeted upstream tests: 0 failed
 - fork core tests: 0 failed
