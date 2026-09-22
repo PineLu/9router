@@ -44,6 +44,58 @@ upstream  git@github.com:decolua/9router.git     # 上游官方
 
 > ⚠️ **开发分支不合并回 master**（自用分支，见 §6 说明）。
 
+### 1.1 分支职责与发布原则
+
+固定约定：
+
+```text
+master
+= 纯上游跟踪分支
+= 只用于同步 / baseline 对比
+= 不用于发布当前自定义版本
+
+sync-upstream-*
+= 临时上游同步与冲突验证分支
+= 通过回归后合入 feat/combo-health-fallback
+= 不作为正式发布分支
+
+feat/combo-health-fallback
+= 当前自定义生产 / 自用发布分支
+= 所有已验收的 fork 定制和上游同步最终都落在这里
+= 构建、部署、发布必须从此分支执行
+```
+
+发布前必须先确认：
+
+```bash
+cd ~/tujia_workspace/9router
+git fetch origin
+git checkout feat/combo-health-fallback
+git pull --ff-only origin feat/combo-health-fallback
+
+git status
+git rev-parse HEAD
+git rev-parse origin/feat/combo-health-fallback
+```
+
+要求：
+
+- 工作区 clean。
+- 本地 HEAD 与 `origin/feat/combo-health-fallback` 一致。
+- 不从 `master` 发布自定义版本，否则会丢失 fork 定制。
+- 不从 `sync-upstream-*` 发布；该类分支只用于同步验证。
+- 上游同步必须先在临时 sync 分支完成冲突处理、定向测试、full-unit baseline 差集、build 和 deploy smoke，全部通过后再合回正式发布分支。
+
+**2026-09-22 当前已验收代码基线：**
+
+```text
+feat/combo-health-fallback
+c2e206242f83957a35429f78675adb388acea992
+```
+
+该基线包含 upstream v0.5.85、现有 fork 定制以及 CodeBuddy `403/code=11140` request-safety 分类修复。后续若仅有文档提交，分支 HEAD 可以高于此 SHA；构建发布时仍以远端 `feat/combo-health-fallback` 最新已验收 HEAD 为准。
+
+
 ---
 
 ## 2. 同步上游仓库到 Fork
@@ -155,7 +207,7 @@ cd ~/tujia_workspace/9router
   - build EXIT=0；`9r-deploy.sh` syntax PASS
   - 部署后 DB：`quick_check=ok` / `journal_mode=delete` / `backupSchemaVersion=2`
   - deployment smoke PASS
-- CodeBuddy `403 / code=11140 / modelLock 120s` 未混入本次同步，仍作为独立后续问题。
+- CodeBuddy `403 / code=11140 / modelLock 120s` 在同步完成后作为独立补丁修复；最终已验收代码基线为 `c2e20624`：safety 403 不再 token refresh、不写 `modelLock_*`、不进 combo cooling；普通权限类 403 仍保持 120s 锁定语义。
 
 ### 4.2 高频冲突文件预判
 
@@ -199,8 +251,17 @@ npx vitest run tests/unit/combo-health-fallback.test.js
 
 ### 5.1 一键发版（推荐）
 
+**只从 `feat/combo-health-fallback` 构建/部署当前自定义版本。**
+
 ```bash
 cd ~/tujia_workspace/9router
+git fetch origin
+git checkout feat/combo-health-fallback
+git pull --ff-only origin feat/combo-health-fallback
+git status
+git rev-parse HEAD
+git rev-parse origin/feat/combo-health-fallback
+
 ./9r-deploy.sh                  # npm install → npm run build → launchctl 重启 → 5 项验证
 ./9r-deploy.sh --skip-build     # 跳过构建，只重启+验证（改 plist/数据时用）
 ./9r-deploy.sh -h               # 帮助
@@ -386,6 +447,11 @@ git add -A && git commit -m "merge: 合并 upstream/master"
 git push origin feat/combo-health-fallback
 
 # ========== 构建与发版 ==========
+# 当前自定义版本只从 feat/combo-health-fallback 发布
+git checkout feat/combo-health-fallback
+git pull --ff-only origin feat/combo-health-fallback
+git status
+git rev-parse HEAD
 ./9r-deploy.sh                  # 完整（install + build + 重启 + 验证）
 ./9r-deploy.sh --skip-build     # 只重启+验证
 
