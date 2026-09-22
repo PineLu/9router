@@ -76,6 +76,49 @@ describe("combo health fallback (failure memory)", () => {
     expect(isComboModelCooling("c5", "p/wobbly")).toBe(false);
   });
 
+  it("falls through on CodeBuddy safety 403 without cooling the model", async () => {
+    const safety403 = JSON.stringify({
+      code: 11140,
+      msg: "request illegal",
+      displayMsg: {
+        en: "The content did not pass the safety review. Please adjust and retry.",
+        zh: "内容未通过安全审核，请调整后重试。",
+      },
+    });
+    const calls = [];
+    const log = quietLog();
+    const handleSingleModel = async (_body, model) => {
+      calls.push(model);
+      if (model === "codebuddy-intl/deepseek-v4.1-flash") {
+        return failRes(403, safety403);
+      }
+      return okRes();
+    };
+    const opts = {
+      body: {},
+      models: ["codebuddy-intl/deepseek-v4.1-flash", "p/good"],
+      handleSingleModel,
+      log,
+      comboName: "codebuddy-safety",
+    };
+
+    const first = await handleComboChat(opts);
+    expect(first.ok).toBe(true);
+    expect(calls).toEqual(["codebuddy-intl/deepseek-v4.1-flash", "p/good"]);
+    expect(isComboModelCooling("codebuddy-safety", "codebuddy-intl/deepseek-v4.1-flash")).toBe(false);
+
+    // The next unrelated request must try CodeBuddy again instead of inheriting
+    // a 2-minute combo health penalty from the previous prompt.
+    const second = await handleComboChat(opts);
+    expect(second.ok).toBe(true);
+    expect(calls).toEqual([
+      "codebuddy-intl/deepseek-v4.1-flash",
+      "p/good",
+      "codebuddy-intl/deepseek-v4.1-flash",
+      "p/good",
+    ]);
+  });
+
   it("skips cooling models, hard-tries when all are cooling", async () => {
     const log = quietLog();
     const calls = [];
