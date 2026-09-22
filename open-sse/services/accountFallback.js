@@ -12,6 +12,40 @@ export function getQuotaCooldown(backoffLevel = 0) {
   return Math.min(cooldown, BACKOFF_CONFIG.max);
 }
 
+
+/**
+ * Detect provider-native safety refusals that are scoped to the current request,
+ * not to credential/model health.
+ *
+ * CodeBuddy returns HTTP 403 for safety review failures (not auth failures), e.g.:
+ *   code=11140, "request illegal", "The content did not pass the safety review."
+ * Treating that as a generic 403 poisons modelLock_* for unrelated requests.
+ */
+export function isRequestScopedSafetyError(status, errorText, provider = null) {
+  if (Number(status) !== 403) return false;
+
+  const providerId = String(provider || "").toLowerCase();
+  const isCodeBuddy = providerId === "codebuddy"
+    || providerId === "codebuddy-intl"
+    || providerId === "codebuddy-cn";
+  if (!isCodeBuddy) return false;
+
+  let text = "";
+  try {
+    text = typeof errorText === "string"
+      ? errorText
+      : JSON.stringify(errorText ?? "");
+  } catch {
+    text = String(errorText ?? "");
+  }
+
+  const lower = text.toLowerCase();
+  return /["']?code["']?\s*:\s*["']?11140["']?/i.test(text)
+    || lower.includes("content did not pass the safety review")
+    || text.includes("内容未通过安全审核")
+    || text.includes("內容未通過安全審核");
+}
+
 /**
  * Check if error should trigger account fallback (switch to next account)
  * Config-driven: matches ERROR_RULES top-to-bottom (text rules first, then status)
@@ -24,10 +58,16 @@ export function getQuotaCooldown(backoffLevel = 0) {
  * @param {string|null} retryAfter - Optional ISO retry-after timestamp from upstream
  * @returns {{ shouldFallback: boolean, cooldownMs: number, newBackoffLevel?: number }}
  */
-export function checkFallbackError(status, errorText, backoffLevel = 0, retryAfter = null) {
+export function checkFallbackError(status, errorText, backoffLevel = 0, retryAfter = null, provider = null) {
   const lowerError = errorText
     ? (typeof errorText === "string" ? errorText : JSON.stringify(errorText)).toLowerCase()
     : "";
+
+  // CodeBuddy uses HTTP 403 for request-level safety review failures. Do not
+  // rotate credentials or persist model/account health state for this request.
+  if (isRequestScopedSafetyError(status, errorText, provider)) {
+    return { shouldFallback: false, cooldownMs: 0, scope: "request_safety" };
+  }
 
   // 429 first: upstream retry window wins over blind backoff.
   if (status === 429) {
