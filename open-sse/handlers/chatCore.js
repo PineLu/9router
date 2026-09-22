@@ -14,6 +14,7 @@ import { handleBypassRequest } from "../utils/bypassHandler.js";
 import { trackPendingRequest, appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
 import { getExecutor } from "../executors/index.js";
 import { supportsGrokCliReasoningEffort } from "../config/grokCli.js";
+import { isRequestScopedSafetyError } from "../services/accountFallback.js";
 import { buildRequestDetail, extractRequestConfig } from "./chatCore/requestDetail.js";
 import { handleForcedSSEToJson } from "./chatCore/sseToJsonHandler.js";
 import { handleNonStreamingResponse } from "./chatCore/nonStreamingHandler.js";
@@ -419,8 +420,29 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     return createErrorResult(HTTP_STATUS.BAD_GATEWAY, errMsg);
   }
 
-  // Handle 401/403 - try token refresh (skip for noAuth providers)
-  if (!executor.noAuth && (providerResponse.status === HTTP_STATUS.UNAUTHORIZED || providerResponse.status === HTTP_STATUS.FORBIDDEN)) {
+  // CodeBuddy uses HTTP 403 for request-level safety review failures. Probe a
+  // clone before auth refresh so code=11140 does not trigger a pointless token
+  // refresh; the original response remains untouched for parseUpstreamError().
+  let requestScopedSafety403 = false;
+  if (providerResponse.status === HTTP_STATUS.FORBIDDEN) {
+    const providerId = String(provider || "").toLowerCase();
+    if (["codebuddy", "codebuddy-intl", "codebuddy-cn", "cbai", "cbcn"].includes(providerId)) {
+      try {
+        requestScopedSafety403 = isRequestScopedSafetyError(
+          providerResponse.status,
+          await providerResponse.clone().text(),
+          provider
+        );
+      } catch {
+        requestScopedSafety403 = false;
+      }
+    }
+  }
+
+  // Handle 401/403 - try token refresh (skip for noAuth providers and
+  // request-scoped CodeBuddy safety refusals).
+  if (!executor.noAuth && !requestScopedSafety403 &&
+      (providerResponse.status === HTTP_STATUS.UNAUTHORIZED || providerResponse.status === HTTP_STATUS.FORBIDDEN)) {
     try {
       // Mutate credentials after each successful refresh: rotating refresh_token
       // providers (xAI/grok-cli) issue a new RT on every refresh; without this,
