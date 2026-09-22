@@ -27,7 +27,9 @@ export function isRequestScopedSafetyError(status, errorText, provider = null) {
   const providerId = String(provider || "").toLowerCase();
   const isCodeBuddy = providerId === "codebuddy"
     || providerId === "codebuddy-intl"
-    || providerId === "codebuddy-cn";
+    || providerId === "codebuddy-cn"
+    || providerId === "cbai"
+    || providerId === "cbcn";
   if (!isCodeBuddy) return false;
 
   let text = "";
