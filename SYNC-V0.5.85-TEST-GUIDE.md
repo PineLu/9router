@@ -296,6 +296,23 @@ This is the focused coverage for the eight manually reconciled files.
 
 ## 9. Full unit suite
 
+Before comparing branch/master failures, make sure native modules were built for the same
+Node ABI used to execute Vitest:
+
+```bash
+node -v
+node -p 'process.versions.modules'
+cd ~/tujia_workspace/9router
+npm rebuild better-sqlite3
+cd tests
+```
+
+If a failure contains `NODE_MODULE_VERSION ... vs ...`, treat that run as an invalid
+environment comparison, rebuild `better-sqlite3` under the active Node, and rerun the
+affected test before calculating NEW REGRESSIONS.
+
+Then run:
+
 ```bash
 npm test -- --config ./vitest.config.js unit 2>&1 | tee /tmp/9router-v0585-sync-unit.log
 ```
@@ -429,6 +446,10 @@ echo "PASS: System One + OpenCode Zen files present"
 
 ## 14. Database integrity before deployment
 
+The database may still reflect the currently/previously deployed build before this staging
+candidate has ever started. Therefore **pre-deploy** this section checks integrity only;
+`journal_mode` and `backupSchemaVersion` are observations, not blockers.
+
 ```bash
 DB="$HOME/.9router/db/data.sqlite"
 
@@ -439,13 +460,31 @@ SELECT key, value FROM _meta WHERE key='backupSchemaVersion';
 "
 ```
 
-Expected:
+Pre-deploy hard requirement:
 
 ```text
-ok
-delete
-backupSchemaVersion|2
+quick_check = ok
 ```
+
+Record the current journal/schema values. If they are still `wal` / schema 1, that is
+acceptable **before first staging deployment** provided source/static checks already prove:
+
+```text
+SCHEMA_VERSION = 2
+journal_mode = DELETE
+synchronous = FULL
+mmap_size = 0
+```
+
+After Section 15 deployment, the runtime DB **must** become:
+
+```text
+quick_check = ok
+journal_mode = delete
+backupSchemaVersion = 2
+```
+
+If it does not, deployment fails.
 
 ---
 
@@ -593,7 +632,8 @@ All must pass before merging staging into `feat/combo-health-fallback`:
 - upstream All Time / Requests / breakdown analytics preserved
 - upstream Combo presets/capabilities preserved
 - deploy script syntax passes and dynamic UID remains
-- database quick_check=ok and journal_mode=delete
+- pre-deploy database quick_check=ok
+- after deployment: quick_check=ok, journal_mode=delete, backupSchemaVersion=2
 - deployment smoke passes
 
 If any hard criterion fails, **do not merge the staging branch into the development branch**.
