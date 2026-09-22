@@ -2,7 +2,7 @@
  * Shared combo (model combo) handling with fallback support
  */
 
-import { checkFallbackError, formatRetryAfter, parseUpstreamRetryMs } from "./accountFallback.js";
+import { checkFallbackError, formatRetryAfter, parseUpstreamRetryMs, isRequestScopedSafetyError } from "./accountFallback.js";
 import { unavailableResponse } from "../utils/error.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { extractTextContent } from "../translator/formats/gemini.js";
@@ -122,6 +122,8 @@ export function isComboModelCooling(comboName, model, now = Date.now()) {
  */
 export function recordComboFailure(comboName, model, status, errorText, retryAfter, now = Date.now()) {
   if (COMBO_TRANSIENT_STATUSES.has(status)) return 0;
+  const providerId = typeof model === "string" && model.includes("/") ? model.split("/", 1)[0] : null;
+  if (isRequestScopedSafetyError(status, errorText, providerId)) return 0;
   const key = getComboHealthKey(comboName, model);
   const prev = comboHealthState.get(key);
   if (status === 429) {
@@ -429,10 +431,16 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
         try { errorText = JSON.stringify(errorText); } catch { errorText = String(errorText); }
       }
 
-      // Check if should fallback to next model
-      const { shouldFallback, cooldownMs } = checkFallbackError(result.status, errorText);
+      // Request-scoped safety refusals should not poison account/model health,
+      // but a combo may still try the next model for this one request.
+      const providerId = typeof modelStr === "string" && modelStr.includes("/") ? modelStr.split("/", 1)[0] : null;
+      const requestScopedSafety = isRequestScopedSafetyError(result.status, errorText, providerId);
+      const { shouldFallback, cooldownMs } = requestScopedSafety
+        ? { shouldFallback: true, cooldownMs: 0 }
+        : checkFallbackError(result.status, errorText);
 
       // Combo-level failure memory: known-bad models are skipped on later requests.
+      // Request-scoped safety refusals are intentionally not persisted as cooling.
       const comboCooldownMs = recordComboFailure(comboName, modelStr, result.status, errorText, retryAfter);
       if (comboCooldownMs > 0) {
         const extra = { status: result.status };
