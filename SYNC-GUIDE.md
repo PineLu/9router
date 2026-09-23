@@ -39,7 +39,7 @@ upstream  git@github.com:decolua/9router.git     # 上游官方
 
 | 分支 | 用途 |
 |---|---|
-| `master` | 跟踪上游，保持干净（当前 `21583c03` / v0.5.85，与 upstream/master 一致） |
+| `master` | 跟踪上游，保持干净（当前 `39e36d3d` / v0.5.86，与 upstream/master 一致） |
 | `feat/combo-health-fallback` | 开发分支，所有魔改都在这里（领先提交数用 `git rev-list --count master..feat/combo-health-fallback` 动态查询） |
 
 > ⚠️ **开发分支不合并回 master**（自用分支，见 §6 说明）。
@@ -86,14 +86,22 @@ git rev-parse origin/feat/combo-health-fallback
 - 不从 `sync-upstream-*` 发布；该类分支只用于同步验证。
 - 上游同步必须先在临时 sync 分支完成冲突处理、定向测试、full-unit baseline 差集、build 和 deploy smoke，全部通过后再合回正式发布分支。
 
-**2026-09-22 当前已验收代码基线：**
+**2026-09-23 当前正式发布基线：**
 
 ```text
 feat/combo-health-fallback
-c2e206242f83957a35429f78675adb388acea992
+d855b86c0a2556a08bee692235f1429d9856b595
 ```
 
-该基线包含 upstream v0.5.85、现有 fork 定制以及 CodeBuddy `403/code=11140` request-safety 分类修复。后续若仅有文档提交，分支 HEAD 可以高于此 SHA；构建发布时仍以远端 `feat/combo-health-fallback` 最新已验收 HEAD 为准。
+该基线包含 upstream v0.5.86、所有现有 fork 定制、CodeBuddy `403/code=11140` request-safety 分类修复、Combo Fallback strategy 修复。后续若仅有文档提交，分支 HEAD 可以高于此 SHA；构建发布时仍以远端 `feat/combo-health-fallback` 最新已验收 HEAD 为准。
+
+后续发布依然：
+
+```bash
+git checkout feat/combo-health-fallback
+git pull --ff-only origin feat/combo-health-fallback
+./9r-deploy.sh
+```
 
 
 ---
@@ -208,6 +216,44 @@ cd ~/tujia_workspace/9router
   - 部署后 DB：`quick_check=ok` / `journal_mode=delete` / `backupSchemaVersion=2`
   - deployment smoke PASS
 - CodeBuddy `403 / code=11140 / modelLock 120s` 在同步完成后作为独立补丁修复；最终已验收代码基线为 `c2e20624`：safety 403 不再 token refresh、不写 `modelLock_*`、不进 combo cooling；普通权限类 403 仍保持 120s 锁定语义。
+
+### 4.1.2 2026-09-23 同步记录（v0.5.85 → v0.5.86）
+
+- 上游：`21583c03` (v0.5.85) → `39e36d3d` (v0.5.86)
+- 规模：4 commits / 23 changed files
+- 验证分支：`sync-upstream-0923-v0.5.86`（保留作审计历史，不删除，不作为发布分支）
+- 正式发布分支仍为 `feat/combo-health-fallback`
+- 真实双父 merge（非 squash、非 force push）：
+  - merge commit：`d855b86c0a2556a08bee692235f1429d9856b595`（`merge: sync upstream v0.5.86 into combo branch`）
+  - parent 1：`8e9b785287af56375d947e1ba6e7a7e10479dcff`（已验收 fork feature）
+  - parent 2：`39e36d3d0c849e0e01dfeacddf111edf892448fc`（upstream v0.5.86）
+- 本次上游主要内容：
+  - Xiaomi MiMo：server-assisted desktop login、headless / Docker login、cn / sgp / ams / ru / in account clusters、`mimo-v2.6-pro` / `mimo-v2.6-flash` / `mimo-v2.6-pro-ultraspeed`、account-service / Cloud API dual route
+  - Claude：`claude-opus-5-5`
+  - Proxy Pools：修复 Headers 对象展开导致 Authorization / Content-Type 等 header 丢失
+  - i18n：React characterData mutation translation
+  - MiMo login security：session 仅 httpOnly cookie、proxy branch 要求 dashboard auth、不转发 Authorization / Proxy-Authorization
+- 与 fork 自定义内容唯一 overlap：`src/dashboardGuard.js`
+  - 保留 fork：`/api/usage/request-details/` 继续位于 `ALWAYS_PROTECTED`
+  - 合入 upstream：`export { isAuthenticated };`，供 `src/proxy.js` 的 Xiaomi MiMo login proxy 复用 dashboard authentication
+  - 两者语义兼容，无功能取舍
+- 未受影响的 fork 核心（v0.5.86 未覆盖/破坏）：
+  - Combo strategy resolver（`src/shared/utils/comboStrategy.js` 保留，`src/sse/handlers/chat.js` 继续使用 `resolveComboStrategy()`）
+  - Combo health fallback
+  - CodeBuddy 11140 request-scoped safety（safety 403 不写 modelLock、不进 combo cooling、不 token refresh；普通 403 仍 fallback / 120s lock）
+  - SQLite DELETE/FULL/mmap_size=0、`backupSchemaVersion=2`
+  - requestDetails reliability、usage custom fields、`9r-deploy.sh`
+  - Fallback live smoke 已在上一轮验证：每个新请求从 model-1 开始、model-1 失败才切 model-2、下一次请求重新从 model-1 开始、health cooling 与 strategy rotation 已区分
+- 验证结果（Tested SHA：`d855b86c0a2556a08bee692235f1429d9856b595`）：
+  - v0.5.86 MiMo targeted：2 files passed / 16 passed / 0 failed
+  - fork core regression：8 files passed / 58 passed / 0 failed
+  - DB reliability：5/5 PASS（每轮 14 passed）
+  - 附加 DB 测试 4 个失败均为 v0.5.85 已知 baseline（db-concurrent：100 parallel count loss、daily summary；request-details-tab：oversized truncated、getDistinctProviders anthropic），不是 v0.5.86 新 regression
+  - `npm run build` EXIT=0；`bash -n 9r-deploy.sh` EXIT=0
+  - full unit：sync 29 failed files / 222 passed / 3 skipped（80 failed tests / 2234 passed / 24 skipped）；master v0.5.86 baseline 29 failed files / 217 passed / 3 skipped（81 failed / 2181 passed / 24 skipped）
+  - NEW REGRESSIONS = 0；FIXED = 1（db-concurrent mixed concurrent）
+  - 结论：v0.5.86 sync validation = PASS（full-unit 有历史 baseline failure，非 100% 无失败）
+  - 本轮没有实际部署
 
 ### 4.2 高频冲突文件预判
 
