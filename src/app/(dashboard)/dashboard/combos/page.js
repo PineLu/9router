@@ -9,6 +9,14 @@ import { Card, Button, Modal, Input, CardSkeleton, ModelSelectModal, ConfirmModa
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { aggregateComboCapabilities } from "open-sse/providers/capabilities.js";
+import {
+  normalizeComboStrategy,
+  resolveComboStrategy,
+  setComboStrategyOverride,
+} from "@/shared/utils/comboStrategy";
+
+// ComboCard shows the runtime-effective value; normalize defensively for props.
+const normalizeComboStrategyValue = (v) => normalizeComboStrategy(v, "fallback");
 
 // Validate combo name: only a-z, A-Z, 0-9, -, _
 const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
@@ -59,6 +67,7 @@ export default function CombosPage() {
   const [editingCombo, setEditingCombo] = useState(null);
   const [activeProviders, setActiveProviders] = useState([]);
   const [comboStrategies, setComboStrategies] = useState({});
+  const [globalComboStrategy, setGlobalComboStrategy] = useState("fallback");
   const [capacityAdapter, setCapacityAdapter] = useState(EMPTY_CAPACITY_ADAPTER);
   const [cooling, setCooling] = useState([]);
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -184,6 +193,7 @@ export default function CombosPage() {
         setActiveProviders(providersData.connections || []);
       }
       setComboStrategies(settingsData.comboStrategies || {});
+      setGlobalComboStrategy(settingsData.comboStrategy || "fallback");
       const rawAdapter = settingsData.capacityAdapter || {};
       const normalized = {};
       for (const cap of CAPACITY_ADAPTER_CAPS) {
@@ -322,17 +332,36 @@ export default function CombosPage() {
     });
   };
 
-  // Merge a per-combo strategy patch into settings.comboStrategies. Passing an empty
-  // patch (strategy back to default "fallback") drops the entry entirely.
+  // Merge a per-combo strategy patch into settings.comboStrategies.
+  // Strategy choices go through the shared resolver so an explicit fallback
+  // against a legacy global round-robin stays persisted (not pruned).
   const handleSetComboStrategy = async (comboName, patch) => {
     try {
-      const updated = { ...comboStrategies };
-      const next = { ...(updated[comboName] || {}), ...patch };
-      // Prune to keep settings clean: default fallback with no extras = no entry.
-      if (!next.fallbackStrategy || next.fallbackStrategy === "fallback") {
-        delete updated[comboName];
+      let updated;
+      if (patch && Object.prototype.hasOwnProperty.call(patch, "fallbackStrategy")) {
+        const { fallbackStrategy, ...rest } = patch;
+        updated = setComboStrategyOverride(
+          comboStrategies,
+          comboName,
+          fallbackStrategy,
+          globalComboStrategy
+        );
+        if (Object.keys(rest).length > 0) {
+          const entry = { ...(updated[comboName] || {}) };
+          for (const [k, v] of Object.entries(rest)) {
+            // judgeModel: "" continues to clean the empty value.
+            if (v === "" && k === "judgeModel") delete entry[k];
+            else entry[k] = v;
+          }
+          if (Object.keys(entry).length === 0) delete updated[comboName];
+          else updated[comboName] = entry;
+        }
       } else {
-        updated[comboName] = next;
+        updated = { ...comboStrategies };
+        const next = { ...(updated[comboName] || {}), ...patch };
+        if (next.judgeModel === "") delete next.judgeModel;
+        if (Object.keys(next).length === 0) delete updated[comboName];
+        else updated[comboName] = next;
       }
 
       await persistComboStrategies(updated);
@@ -345,16 +374,14 @@ export default function CombosPage() {
     if (selectedCombos.length === 0 || !strategy) return;
     setBulkBusy(true);
     try {
-      const updated = { ...comboStrategies };
+      let updated = { ...comboStrategies };
       for (const combo of selectedCombos) {
-        if (!strategy || strategy === "fallback") {
-          delete updated[combo.name];
-        } else {
-          updated[combo.name] = {
-            ...(updated[combo.name] || {}),
-            fallbackStrategy: strategy,
-          };
-        }
+        updated = setComboStrategyOverride(
+          updated,
+          combo.name,
+          strategy,
+          globalComboStrategy
+        );
       }
       await persistComboStrategies(updated);
     } catch (error) {
@@ -534,6 +561,13 @@ export default function CombosPage() {
                   onEdit={() => setEditingCombo(combo)}
                   onDelete={() => handleDelete(combo.id)}
                   strategy={comboStrategies[combo.name] || {}}
+                  effectiveStrategy={resolveComboStrategy(
+                    {
+                      comboStrategy: globalComboStrategy,
+                      comboStrategies,
+                    },
+                    combo.name
+                  )}
                   onSetStrategy={(patch) => handleSetComboStrategy(combo.name, patch)}
                   selected={selectedIds.includes(combo.id)}
                   onToggleSelect={() => toggleSelect(combo.id)}
@@ -598,9 +632,10 @@ const fmtK = (n) => {
   return `${Math.round(n / 1000)}k`;
 };
 
-function ComboCard({ combo, getCaps, comboByName = {}, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, onSetStrategy, selected = false, onToggleSelect }) {
+function ComboCard({ combo, getCaps, comboByName = {}, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, effectiveStrategy, onSetStrategy, selected = false, onToggleSelect }) {
   const [showJudgeSelect, setShowJudgeSelect] = useState(false);
-  const current = strategy.fallbackStrategy || "fallback";
+  // Display must match runtime: resolve via shared resolver, never raw override.
+  const current = normalizeComboStrategyValue(effectiveStrategy ?? strategy.fallbackStrategy);
   const judge = strategy.judgeModel || "";
   const isFusion = current === "fusion";
   const comboCaps = aggregateComboCapabilities(combo.models, comboByName);
