@@ -3,7 +3,7 @@ import {
   normalizeComboStrategy,
   resolveComboStrategy,
   setComboStrategyOverride,
-} from "../../open-sse/services/comboStrategy.js";
+} from "../../src/shared/utils/comboStrategy.js";
 
 describe("combo strategy resolution", () => {
   it("inherits legacy global strategy when no per-combo override exists", () => {
