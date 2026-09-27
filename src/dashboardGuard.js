@@ -49,6 +49,7 @@ const ALWAYS_PROTECTED = [
   // is configured for passwordless access. Keep the redacted list endpoint
   // under normal /api auth rules; only individual detail rows are always protected.
   "/api/usage/request-details/",
+  "/api/oauth/zed/auto-import",
 ];
 
 // Require auth, but allow through if requireLogin is disabled
@@ -85,6 +86,7 @@ const LOCAL_ONLY_PATHS = [
   "/api/tunnel/disable",
   "/api/oauth/cursor/auto-import",
   "/api/oauth/kiro/auto-import",
+  "/api/oauth/zed/auto-import",
   "/api/auth/reset-password",
   "/api/headroom/start",
   "/api/headroom/stop",
