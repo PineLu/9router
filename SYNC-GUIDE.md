@@ -39,8 +39,9 @@ upstream  git@github.com:decolua/9router.git     # 上游官方
 
 | 分支 | 用途 |
 |---|---|
-| `master` | 跟踪上游，保持干净（当前 `39e36d3d` / v0.5.86，与 upstream/master 一致） |
-| `feat/combo-health-fallback` | 开发分支，所有魔改都在这里（领先提交数用 `git rev-list --count master..feat/combo-health-fallback` 动态查询） |
+| `master` | 跟踪上游，保持干净（当前 `a99cf572` / v0.5.95，与 upstream/master 一致） |
+| `feat/combo-health-fallback` | 正式自用/发布分支；当前 `0a5025a6` / v0.5.91，所有已验收 fork 定制都在这里 |
+| `sync-upstream-1002-v0.5.95` | 当前 v0.5.95 验收分支；tested code merge=`efe37df7`，尚未推进正式 feature、尚未部署 |
 
 > ⚠️ **开发分支不合并回 master**（自用分支，见 §6 说明）。
 
@@ -84,16 +85,16 @@ git rev-parse origin/feat/combo-health-fallback
 - 本地 HEAD 与 `origin/feat/combo-health-fallback` 一致。
 - 不从 `master` 发布自定义版本，否则会丢失 fork 定制。
 - 不从 `sync-upstream-*` 发布；该类分支只用于同步验证。
-- 上游同步必须先在临时 sync 分支完成冲突处理、定向测试、full-unit baseline 差集、build 和 deploy smoke，全部通过后再合回正式发布分支。
+- 上游同步必须先在临时 sync 分支完成冲突处理、定向测试、baseline 对照、独立 review 和 build；验证通过后再 **fast-forward** 正式发布分支。部署 smoke 只在正式 feature 推进后、明确决定发布时执行。
 
-**2026-09-23 当前正式发布基线：**
+**2026-10-02 当前正式发布基线：**
 
 ```text
 feat/combo-health-fallback
-d855b86c0a2556a08bee692235f1429d9856b595
+0a5025a6089d0d65613ea95bd49e499e0085996f
 ```
 
-该基线包含 upstream v0.5.86、所有现有 fork 定制、CodeBuddy `403/code=11140` request-safety 分类修复、Combo Fallback strategy 修复。后续若仅有文档提交，分支 HEAD 可以高于此 SHA；构建发布时仍以远端 `feat/combo-health-fallback` 最新已验收 HEAD 为准。
+该基线包含 upstream v0.5.91、所有现有 fork 定制，并已于 2026-09-27 完成部署与 live smoke。当前 v0.5.95 已在 `sync-upstream-1002-v0.5.95` 验收，tested code merge 为 `efe37df7136c7328a722c26735922c182e5f861f`，但**尚未推进正式 feature、尚未部署**。后续若 sync 分支只追加文档提交，tested code SHA 仍以 `efe37df7` 为准。
 
 后续发布依然：
 
@@ -140,34 +141,51 @@ git push origin master
 
 ## 3. 合并上游更新到开发分支
 
-### 3.1 切到开发分支
+### 3.1 从正式 feature 创建 sync 分支
+
+```bash
+git fetch origin upstream
+git checkout feat/combo-health-fallback
+git pull --ff-only origin feat/combo-health-fallback
+
+git checkout -b sync-upstream-YYYYMMDD-vX.Y.Z
+```
+
+> **必须使用 sync 分支**：禁止直接把 `upstream/master` merge 到 `feat/combo-health-fallback`。sync 分支既是冲突处理区，也是测试与审计证据载体。
+
+### 3.2 在 sync 分支合并 upstream
+
+```bash
+git merge --no-ff upstream/master -m "merge: sync upstream vX.Y.Z into combo branch"
+```
+
+如果出现冲突，需要手动解决（见第 4 节）。解决后先验证语义，不要急着推进正式 feature。
+
+### 3.3 验证并推送 sync 分支
+
+```bash
+# 至少：冲突区/核心 fork 回归 + upstream 新高风险点 + baseline 对照 + build
+git diff --check
+npm run build
+bash -n 9r-deploy.sh
+
+git push -u origin sync-upstream-YYYYMMDD-vX.Y.Z
+```
+
+sync 分支**不部署**。可用本地 Codex 做独立只读 review；review 发现的问题应区分“merge regression”与“纯 upstream 问题”。
+
+### 3.4 验收通过后 fast-forward 正式 feature
 
 ```bash
 git checkout feat/combo-health-fallback
-```
-
-### 3.2 合并上游 master
-
-```bash
-git merge upstream/master
-```
-
-如果出现冲突，需要手动解决（见第 4 节）。
-
-> **建议**：上游更新频繁时，可先建一个临时同步分支（如 `sync-upstream-0922-v0.5.85`）合并上游，
-> 解决完冲突再合入开发分支，避免直接污染开发分支历史。
-
-### 3.3 推送到 Fork
-
-```bash
+git merge --ff-only sync-upstream-YYYYMMDD-vX.Y.Z
 git push origin feat/combo-health-fallback
 ```
 
-### 3.4 合并后必须验证
+只有正式 feature 推进完成、且明确决定发布时才执行：
 
 ```bash
-cd ~/tujia_workspace/9router
-./9r-deploy.sh          # 构建 + 重启 + 5 项验证
+./9r-deploy.sh
 ```
 
 **关键回归点**（上游合并最容易冲掉的自定义改动）：
@@ -254,6 +272,55 @@ cd ~/tujia_workspace/9router
   - NEW REGRESSIONS = 0；FIXED = 1（db-concurrent mixed concurrent）
   - 结论：v0.5.86 sync validation = PASS（full-unit 有历史 baseline failure，非 100% 无失败）
   - 本轮没有实际部署
+
+
+### 4.1.3 2026-09-27 同步记录（v0.5.86 → v0.5.91）
+
+- 上游：`39e36d3d` (v0.5.86) → `f01fb909` (v0.5.91)
+- 规模：38 commits / 123 changed files
+- 验证分支：`sync-upstream-0927-v0.5.91`
+- 真实双父 merge：`0a5025a6089d0d65613ea95bd49e499e0085996f`
+  - parent 1：`def20a1c5584d2852d336c45758773267c03e5f6`
+  - parent 2：`f01fb909e37189008080632ddaf404f096345cde`
+- Git 实际冲突只有 3 个：
+  - `open-sse/handlers/chatCore/nonStreamingHandler.js`
+  - `open-sse/handlers/chatCore/streamingHandler.js`
+  - `src/dashboardGuard.js`
+- 冲突融合：
+  - streaming / non-streaming：保留 fork refusal/content-filter 语义，同时接入 upstream response-header forwarding
+  - dashboard guard：保留 `/api/usage/request-details/` 强制保护，同时接入 Zed auto-import 的 local/auth 保护
+- 验证：
+  - 定向回归 31 files：317 passed / 4 failed；4 个失败经纯 upstream v0.5.91 对照均为 baseline，不是 merge regression
+  - `npm run build` PASS；`bash -n 9r-deploy.sh` PASS
+  - 本地 Codex review 无有效 blocking finding（Zed auto-import P1 经 `src/proxy.js → dashboardGuard.js` 请求链路核验为误报）
+  - `NEW REGRESSIONS = 0`
+- `feat/combo-health-fallback` 后续 fast-forward 到 `0a5025a6` 并部署；Round Robin / Fallback / 基础 chat / DB integrity live smoke 均通过。
+
+### 4.1.4 2026-10-02 同步记录（v0.5.91 → v0.5.95）
+
+- 上游：`f01fb909` (v0.5.91) → `a99cf572` (v0.5.95)
+- 规模：41 commits / 137 changed files
+- 验证分支：`sync-upstream-1002-v0.5.95`
+- tested code 双父 merge：`efe37df7136c7328a722c26735922c182e5f861f`
+  - parent 1：`0a5025a6089d0d65613ea95bd49e499e0085996f`
+  - parent 2：`a99cf57239ff778b61e434c2786009d5ed1c412c`
+- 与 fork 定制重叠 6 files，实际文本冲突 4 files：
+  - `open-sse/handlers/chatCore.js`：`comboName` / CodeBuddy 11140 + upstream `providerOverrides`
+  - `open-sse/services/accountFallback.js`：11140 request-safety / retry window + upstream provider-scoped fallback rules
+  - `src/sse/handlers/chat.js`：`resolveComboStrategy` / `comboCtx` + upstream `requestedModel` / `providerOverrides`
+  - `src/sse/services/auth.js`：同时保留 `retryAfterIso` 与 upstream `resolveProviderId(provider)`
+- 独立 Codex review 额外发现并修复 2 个 upstream P1：
+  1. bare GPT 路由从宽泛 `^gpt-[56]\.` 收窄为 Codex registry 精确 id，避免 OpenAI-only `gpt-5.4*` 误走 Codex
+  2. TLS 证书失败默认不再 `rejectUnauthorized:false` 降级；仅显式 `STRICT_SSL=false/0` 才允许 insecure retry
+- 验证：
+  - 首轮 29 files：258 passed / 1 failed / 1 todo；唯一失败是 upstream 自身 `gpt-6.1-sol` contextWindow 旧断言（272000 vs 1050000）
+  - 最终路由/TLS/strict-proxy：4 files / 34 tests 全 PASS
+  - Combo / CodeBuddy 核心回归 PASS
+  - `npm run build` PASS；`bash -n 9r-deploy.sh` PASS
+  - Alias / OAuth baseline PASS；Provider baseline 仅 Codex CLI header `0.155.0 → 0.159.0` 的 upstream stale baseline
+  - 最终 Codex review 无 P1；剩余 upstream P2：Provider 自定义 Header UI 对 TinyFish 独立 search/fetch handler 暂不生效
+- **当前只完成 sync 验收并推送，尚未推进 `feat/combo-health-fallback`，尚未部署。**
+- 如果本节文档作为后续 docs-only commit 推到 sync 分支，则 sync HEAD 会高于 `efe37df7`；`efe37df7` 仍是 tested code merge SHA。
 
 ### 4.2 高频冲突文件预判
 
@@ -384,7 +451,7 @@ npm run build
 
 **分支名：** `feat/combo-health-fallback`
 
-**基于：** upstream/master `21583c03` / v0.5.85 (2026-09-22) + 自定义魔改
+**当前正式基线：** upstream v0.5.91 / `f01fb909` + fork 定制（feature=`0a5025a6`）；v0.5.95 已在 sync 分支 `efe37df7` 验收，尚未推进正式 feature。
 
 **领先 master：** 动态查询：`git rev-list --count master..feat/combo-health-fallback`
 
@@ -480,16 +547,24 @@ sqlite3 -readonly ~/.9router/db/data.sqlite "PRAGMA journal_mode;"   # 必须回
 ## 7. 常用命令速查
 
 ```bash
-# ========== 同步上游 ==========
+# ========== 同步 upstream → 干净 master ==========
 cd ~/tujia_workspace/9router
-git fetch upstream
-git checkout master && git merge upstream/master && git push origin master
+git fetch origin upstream
+git checkout master
+git merge --ff-only upstream/master
+git push origin master
 
-# ========== 合并到开发分支 ==========
+# ========== 从正式 feature 建 sync 分支 ==========
 git checkout feat/combo-health-fallback
-git merge upstream/master
-# 解决冲突后（重点检查 schema.js 的 PRAGMA！）：
-git add -A && git commit -m "merge: 合并 upstream/master"
+git pull --ff-only origin feat/combo-health-fallback
+git checkout -b sync-upstream-YYYYMMDD-vX.Y.Z
+git merge --no-ff upstream/master -m "merge: sync upstream vX.Y.Z into combo branch"
+# 解决冲突后：定向测试 / baseline 对照 / Codex review / build
+git push -u origin sync-upstream-YYYYMMDD-vX.Y.Z
+
+# ========== 验收后推进正式 feature（只允许 fast-forward） ==========
+git checkout feat/combo-health-fallback
+git merge --ff-only sync-upstream-YYYYMMDD-vX.Y.Z
 git push origin feat/combo-health-fallback
 
 # ========== 构建与发版 ==========
@@ -523,4 +598,4 @@ sqlite3 -readonly ~/.9router/db/data.sqlite "PRAGMA quick_check;"    # ok
 |---|---|
 | `HANDOFF.md` | 项目交接（当前状态、待办、变更记录） |
 | `MAINTENANCE.md` | 维护手册（架构、排查、SQLite 恢复 SOP、发版流程） |
-| `../ObsidianNotes/AgentSync/knowledge/9router-knowledge.md` | 知识库（部署形态、用量查询、故障案例） |
+| `~/Documents/ObsidianNotes/AgentSync/knowledge/9router/9router-knowledge.md` | 知识库（部署形态、fork 同步治理、用量查询、故障案例） |
