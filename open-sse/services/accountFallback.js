@@ -83,6 +83,7 @@ export function checkFallbackError(status, errorText, backoffLevel = 0, retryAft
   }
 
   for (const rule of ERROR_RULES) {
+    if (rule.provider && rule.provider !== provider) continue;
     // Text-based rule: match substring in error message
     if (rule.text && lowerError && lowerError.includes(rule.text)) {
       if (rule.backoff) {

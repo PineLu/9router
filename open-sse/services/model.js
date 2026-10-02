@@ -1,5 +1,12 @@
 import REGISTRY from "../providers/registry/index.js";
 
+const CODEX_BARE_MODEL_IDS = new Set(
+  (REGISTRY.find((entry) => entry.id === "codex")?.models || [])
+    .map((model) => (typeof model === "string" ? model : model?.id))
+    .filter(Boolean)
+    .map((id) => id.toLowerCase())
+);
+
 // Alias→id derived from registry single-source: id→id, alias→id, aliases[]→id.
 // Media-only providers without a registry transport entry keep explicit aliases here.
 const MEDIA_ONLY_ALIASES = {
@@ -124,8 +131,6 @@ export async function getModelInfoCore(modelStr, aliasesOrGetter) {
 
 // Config-driven prefix → provider inference (first match wins, fallback "openai").
 const MODEL_PREFIX_PROVIDERS = [
-  // Codex CLI sends this bare virtual model for auto-review — keep it on OAuth Codex (#1398).
-  [/^codex-auto-review$/, "codex"],
   [/^claude-/, "anthropic"],
   [/^gemini-/, "gemini"],
   [/^gpt-/, "openai"],
@@ -140,5 +145,9 @@ const MODEL_PREFIX_PROVIDERS = [
 function inferProviderFromModelName(modelName) {
   if (!modelName) return "openai";
   const m = modelName.toLowerCase();
+  // Codex CLI emits bare ids from its own model catalog. Route those exact ids
+  // through Codex OAuth, but do not capture OpenAI-only ids such as gpt-5.4,
+  // which Codex explicitly removed from its registry (#4202, #4405).
+  if (CODEX_BARE_MODEL_IDS.has(m)) return "codex";
   return MODEL_PREFIX_PROVIDERS.find(([re]) => re.test(m))?.[1] || "openai";
 }

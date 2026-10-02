@@ -31,6 +31,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     ? excludeConnectionIds
     : (excludeConnectionIds ? new Set([excludeConnectionIds]) : new Set());
   const preferredConnectionId = options?.preferredConnectionId || null;
+  const requestedModel = options?.requestedModel || model;
   // Acquire mutex to prevent race conditions
   const currentMutex = selectionMutex;
   let resolveMutex;
@@ -85,6 +86,8 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     const availableConnections = connections.filter(c => {
       if (excludeSet.has(c.id)) return false;
       if (isModelLockActive(c, model)) return false;
+      const enabled = c.providerSpecificData?.enabledModels;
+      if (providerId === "codex" && Array.isArray(enabled) && enabled.length && requestedModel && !enabled.includes(requestedModel)) return false;
       // Antigravity: skip if live quota exhausted for this model
       if (isAntigravity && model && antigravityQuotaCache) {
         const quota = antigravityQuotaCache.get(c.id)?.[model];
@@ -259,11 +262,12 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
       : Math.min(resetsAtMs - Date.now(), MAX_RATE_LIMIT_COOLDOWN_MS);
     newBackoffLevel = 0;
   } else {
-    // Pass resetsAtMs as retryAfter so 429 honors upstream retry windows
-    // ("Try again in Nm" in errorText or ISO timestamp), capped at 30min.
-    // Same policy as combo-level recordComboFailure.
+    // Preserve fork retry-window handling while passing upstream's canonical
+    // provider id so provider-scoped fallback rules (for example Codex) match.
     const retryAfterIso = resetsAtMs && resetsAtMs > Date.now() ? new Date(resetsAtMs).toISOString() : null;
-    ({ shouldFallback, cooldownMs, newBackoffLevel } = checkFallbackError(status, errorText, backoffLevel, retryAfterIso, provider));
+    ({ shouldFallback, cooldownMs, newBackoffLevel } = checkFallbackError(
+      status, errorText, backoffLevel, retryAfterIso, resolveProviderId(provider)
+    ));
   }
   if (!shouldFallback) return { shouldFallback: false, cooldownMs: 0 };
 
