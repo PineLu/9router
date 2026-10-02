@@ -255,6 +255,20 @@ cd ~/tujia_workspace/9router
   - 结论：v0.5.86 sync validation = PASS（full-unit 有历史 baseline failure，非 100% 无失败）
   - 本轮没有实际部署
 
+### 4.1.3 2026-10-02 同步记录（v0.5.91 → v0.5.95）
+
+- 上游：`f01fb909` (v0.5.91) → `a99cf572` (v0.5.95)，41 commits / 137 changed files。
+- 验证分支：`sync-upstream-1002-v0.5.95`。
+- tested code merge：`efe37df7136c7328a722c26735922c182e5f861f`，双父分别为 `0a5025a6` + `a99cf572`。
+- 实际冲突 4 个：`open-sse/handlers/chatCore.js`、`open-sse/services/accountFallback.js`、`src/sse/handlers/chat.js`、`src/sse/services/auth.js`。
+- 冲突融合原则：保留 fork 的 Combo resolver / CodeBuddy 11140 / retry-window，同时吸收 upstream 的 `requestedModel`、`providerOverrides`、provider-scoped fallback。
+- 独立 Codex review 额外修复 2 个 upstream 风险：
+  1. bare GPT 路由改为按 Codex registry 精确 model id 判断，避免 OpenAI-only `gpt-5.4*` 误走 Codex；
+  2. TLS 证书失败默认不再 insecure retry，只有显式 `STRICT_SSL=false/0` 才允许。
+- 验证：核心/新增高风险定向回归通过；最终路由/TLS/strict-proxy 4 files / 34 tests PASS；`npm run build` PASS；`bash -n 9r-deploy.sh` PASS。
+- 已知 upstream baseline：`codex-gpt6-lite` 的 contextWindow 旧断言（272000 vs 1050000）；Provider baseline 的 Codex CLI header 版本滞后；另有 Provider Header UI 对 TinyFish search/fetch 不生效的 upstream P2。
+- `feat/combo-health-fallback` 已于 2026-10-02 fast-forward 到 `efe37df7`；本次仅完成代码推进，**尚未部署**。
+
 ### 4.2 高频冲突文件预判
 
 以下文件是本 fork 改动最集中的地方，上游若动同区域必然冲突：
@@ -384,7 +398,7 @@ npm run build
 
 **分支名：** `feat/combo-health-fallback`
 
-**基于：** upstream/master `21583c03` / v0.5.85 (2026-09-22) + 自定义魔改
+**基于：** upstream/master `a99cf572` / v0.5.95 (2026-10-01) + fork 定制；tested code merge=`efe37df7`；尚未部署
 
 **领先 master：** 动态查询：`git rev-list --count master..feat/combo-health-fallback`
 
