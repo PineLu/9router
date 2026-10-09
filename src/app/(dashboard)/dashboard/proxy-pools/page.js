@@ -662,16 +662,13 @@ export default function ProxyPoolsPage() {
                   <span className="material-symbols-outlined text-[20px] text-green-500">terminal</span>
                   Deno Relay
                 </button>
-                <button
-                  onClick={() => {
-                    openNetlifyModal();
-                    setShowRelayMenu(false);
-                  }}
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-main transition-colors hover:bg-black/5 dark:hover:bg-white/5"
+                <div
+                  title="Disabled: the upstream Netlify relay deploys an unauthenticated public proxy"
+                  className="flex w-full cursor-not-allowed items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-muted opacity-60"
                 >
                   <span className="material-symbols-outlined text-[20px] text-teal-500">deployed_code</span>
-                  Netlify Relay
-                </button>
+                  Netlify Relay (disabled)
+                </div>
               </div>
             )}
           </div>

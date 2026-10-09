@@ -151,83 +151,24 @@ describe("netlifyRelay helpers", () => {
   });
 });
 
-describe("POST /api/proxy-pools/netlify-deploy", () => {
-  it("rejects a missing token with 400 without calling Netlify", async () => {
-    stubFetch(async () => { throw new Error("must not call Netlify"); });
-    const res = await POST(postRoute({ projectName: "x" }));
-    expect(res.status).toBe(400);
-    expect((await res.json()).error).toMatch(/token/i);
+describe("POST /api/proxy-pools/netlify-deploy — disabled in this fork", () => {
+  it("refuses requests even when a token is supplied, before any external effect", async () => {
+    const fetchSpy = vi.fn(async () => { throw new Error("must not call Netlify"); });
+    stubFetch(fetchSpy);
+    const res = await POST(postRoute({ netlifyToken: "fake-token", projectName: "test" }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toMatch(/disabled/i);
+    expect(fetchSpy).not.toHaveBeenCalled();
     expect(createProxyPool).not.toHaveBeenCalled();
   });
 
-  it("runs the digest-deploy flow and creates a netlify pool", async () => {
-    const { sha256: fnSha } = net.buildRelayFunctionZip();
-    const { sha1: idxSha } = net.buildIndexFile();
-    const seen = [];
-
-    stubFetch(async (url, init = {}) => {
-      seen.push({ url, method: init.method });
-      if (url === "https://api.netlify.com/api/v1/sites") {
-        expect(JSON.parse(init.body).name).toBe("netlify-relay");
-        return { ok: true, status: 201, json: async () => ({ id: "site_1", ssl_url: "https://relay-x.netlify.app" }) };
-      }
-      if (url === "https://api.netlify.com/api/v1/sites/site_1/deploys") {
-        const body = JSON.parse(init.body);
-        expect(body.files).toEqual({ "/index.html": idxSha });
-        expect(body.functions).toEqual({ relay: fnSha });
-        return { ok: true, status: 200, json: async () => ({ id: "deploy_1", required: [idxSha], required_functions: [fnSha] }) };
-      }
-      if (url.includes("/files/index.html")) return { ok: true, status: 200, json: async () => ({}) };
-      if (url.includes("/functions/relay?runtime=js")) return { ok: true, status: 200, json: async () => ({}) };
-      if (url === "https://api.netlify.com/api/v1/deploys/deploy_1") {
-        return { ok: true, status: 200, json: async () => ({ state: "ready", id: "deploy_1" }) };
-      }
-      throw new Error(`unexpected fetch: ${url}`);
-    });
-
-    const res = await POST(postRoute({ netlifyToken: "nfp_test", projectName: "Netlify-Relay!!" }));
-    expect(res.status).toBe(201);
-    const data = await res.json();
-    expect(data.deployUrl).toBe("https://relay-x.netlify.app/.netlify/functions/relay");
-    expect(createProxyPool).toHaveBeenCalledWith(expect.objectContaining({
-      name: "netlify-relay",
-      proxyUrl: "https://relay-x.netlify.app/.netlify/functions/relay",
-      type: "netlify",
-    }));
-    expect(seen.map((s) => `${s.method || "GET"} ${s.url}`)).toEqual([
-      "POST https://api.netlify.com/api/v1/sites",
-      "POST https://api.netlify.com/api/v1/sites/site_1/deploys",
-      "PUT https://api.netlify.com/api/v1/deploys/deploy_1/files/index.html",
-      "PUT https://api.netlify.com/api/v1/deploys/deploy_1/functions/relay?runtime=js",
-      "GET https://api.netlify.com/api/v1/deploys/deploy_1",
-    ]);
-  });
-
-  it("skips uploads Netlify already has and maps a taken name to 409", async () => {
-    stubFetch(async (url) => {
-      if (url === "https://api.netlify.com/api/v1/sites") {
-        return { ok: true, status: 201, json: async () => ({ id: "s1", ssl_url: "https://a.netlify.app" }) };
-      }
-      if (url === "https://api.netlify.com/api/v1/sites/s1/deploys") {
-        return { ok: true, status: 200, json: async () => ({ id: "d1", required: [], required_functions: [] }) };
-      }
-      if (url === "https://api.netlify.com/api/v1/deploys/d1") {
-        return { ok: true, status: 200, json: async () => ({ state: "ready", id: "d1" }) };
-      }
-      throw new Error(`unexpected fetch: ${url}`);
-    });
-    const res = await POST(postRoute({ netlifyToken: "nfp_test" }));
-    expect(res.status).toBe(201);
-
-    stubFetch(async (url) => {
-      if (url === "https://api.netlify.com/api/v1/sites") {
-        return { ok: false, status: 422, json: async () => ({ message: "name taken" }) };
-      }
-      throw new Error(`unexpected fetch: ${url}`);
-    });
-    const taken = await POST(postRoute({ netlifyToken: "nfp_test", projectName: "taken" }));
-    expect(taken.status).toBe(409);
-    expect((await taken.json()).error).toMatch(/different name/i);
+  it("refuses tokenless requests the same way", async () => {
+    const fetchSpy = vi.fn();
+    stubFetch(fetchSpy);
+    const res = await POST(postRoute({}));
+    expect(res.status).toBe(403);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(createProxyPool).not.toHaveBeenCalled();
   });
 });
 
