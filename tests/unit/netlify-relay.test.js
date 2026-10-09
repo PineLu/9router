@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
 
 vi.mock("@/models", () => ({
   getProxyPoolById: vi.fn(),
@@ -152,6 +153,13 @@ describe("netlifyRelay helpers", () => {
 });
 
 describe("POST /api/proxy-pools/netlify-deploy — disabled in this fork", () => {
+  it("renders an inert Netlify menu item with no click handler", () => {
+    const source = readFileSync(new URL("../../src/app/(dashboard)/dashboard/proxy-pools/page.js", import.meta.url), "utf8");
+    const disabledMenu = source.match(/<div[^>]*title="Disabled: the upstream Netlify relay[^>]*>[\s\S]*?Netlify Relay \(disabled\)\s*<\/div>/);
+    expect(disabledMenu).not.toBeNull();
+    expect(disabledMenu[0]).not.toMatch(/onClick|<button/);
+  });
+
   it("refuses requests even when a token is supplied, before any external effect", async () => {
     const fetchSpy = vi.fn(async () => { throw new Error("must not call Netlify"); });
     stubFetch(fetchSpy);
