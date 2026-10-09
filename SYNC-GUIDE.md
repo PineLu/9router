@@ -284,6 +284,17 @@ cd ~/tujia_workspace/9router
 - 已知 upstream baseline：Alias、Provider 快照仍滞后，官方同 SHA 验证同样失败（含 Codex CLI header、Kimi Responses、MiniMax Code）；OAuth URL PASS。不得把这些历史失败描述成全量绿灯。
 - **同步 ≠ 部署**：正式分支推进后，运行服务仍使用 2026-10-02 部署的 v0.5.95 产物；仅在另行从 `feat/combo-health-fallback` 执行 `9r-deploy.sh` 并验证 5 项 live smoke 后才能标记 v0.5.99 已上线。
 
+### 4.1.5 2026-10-09 v0.5.99 正式部署与数据安全验证
+
+- **部署代码 SHA**：`feat/combo-health-fallback @ cc55371e`（在 `60a647f2` 合并基础上增加 `362119bb` 安全修复及 `cc55371e` UI 门禁测试）；使用**生产 Node 22.22.3** 执行 `9r-deploy.sh`，完整 npm install/build/launchd restart/smoke **exit 0**。
+- **独立 Codex 复审**：发现上游 Netlify Relay 公开任意目标代理风险；本 fork 禁止新建 Netlify 部署（API 固定 HTTP 403，界面入口不可交互），保留其他 Relay 和已有代理池兼容；复审所提 P2 UI 测试覆盖已补，定向测试通过。
+- **生产切换前异常**：旧服务实际 DB 是 `journal_mode=wal`，且存在正被旧进程使用的 `data.sqlite-wal`，不可只拷贝主 SQLite 文件。旧库 `quick_check=ok`，`backupSchemaVersion=2`。
+- **独立安全备份**：采用 SQLite 在线 `.backup` 把主库与已提交 WAL 事务一致地复制到私有目录 `~/.9router-upgrade-backups/pre-v0599-20261009-110349/`；额外保存最新 `latest-pre-switch.sqlite`、认证/本地标识文件及旧构建 `previous-next/`（旧 `.next` 约 1.1GB）。备份库 `integrity_check=ok` 且可独立以 `DELETE` 模式打开；该私有目录不可自动清理，须保留作为回滚依据。备份含敏感认证材料，禁止上传或提交仓库。
+- **真实旧库副本迁移演练**：隔离 worktree 中分别用 Node 25/`node:sqlite` 和生产同版 Node 22.22.3/`better-sqlite3` 启动 v0.5.99；均正常完成 `backupSchemaVersion 2→3` 备份、自动增列、`DELETE` 和 `integrity_check=ok`。原始配置和业务表计数未变化，历史用量 13552、请求明细 1000 条均保留。
+- **生产 live smoke**：launchd 新 PID `11840` 正常，宿主机 `/v1/models` HTTP 200，new-api 容器可通过 `host.containers.internal:20128` 请求，`journal_mode=delete`，`quick_check=ok`，近 100 行日志 `malformed=0`；部署后额外 `integrity_check=ok`，`backupSchemaVersion=3`，API Key 的 2 个新权限列存在，`-wal/-shm` 文件均不存在。
+- **生产全量记录数对比**：切换前最新快照、切换后均为 `apiKeys=3` / `combos=3` / `providerConnections=14` / `usageHistory=13552` / `requestDetails=1000`。新旧 `.next/BUILD_ID` 不同，确认正式服务运行新构建。未认证的 Netlify 部署入口 HTTP 401（网关登录保护），认证后后端仍固定 403。
+- **结论**：v0.5.99 **已上线并完成真实库迁移验收**；本次未观察到数据损坏或记录丢失。数据库备份和旧版构建快照保留，不承诺任何软件升级绝对零风险。
+
 ### 4.2 高频冲突文件预判
 
 以下文件是本 fork 改动最集中的地方，上游若动同区域必然冲突：
@@ -413,7 +424,7 @@ npm run build
 
 **分支名：** `feat/combo-health-fallback`
 
-**基于：** upstream/master `ce4460ef` / v0.5.99 (2026-10-08) + fork 定制；tested code merge=`60a647f2`；本机正在运行的服务仍为 2026-10-02 部署的 v0.5.95，**v0.5.99 尚未部署**
+**基于：** upstream/master `ce4460ef` / v0.5.99 (2026-10-08) + fork 定制；tested code merge=`60a647f2`，安全修复及上线代码 `cc55371e`；**2026-10-09 已正式部署 v0.5.99**（详见 §4.1.5）
 
 **领先 master：** 动态查询：`git rev-list --count master..feat/combo-health-fallback`
 
