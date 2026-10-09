@@ -39,7 +39,7 @@ upstream  git@github.com:decolua/9router.git     # 上游官方
 
 | 分支 | 用途 |
 |---|---|
-| `master` | 跟踪上游，保持干净（当前 `39e36d3d` / v0.5.86，与 upstream/master 一致） |
+| `master` | 跟踪上游，保持干净（2026-10-09 同步目标 `ce4460ef` / v0.5.99，与 upstream/master 一致） |
 | `feat/combo-health-fallback` | 开发分支，所有魔改都在这里（领先提交数用 `git rev-list --count master..feat/combo-health-fallback` 动态查询） |
 
 > ⚠️ **开发分支不合并回 master**（自用分支，见 §6 说明）。
@@ -269,6 +269,21 @@ cd ~/tujia_workspace/9router
 - 已知 upstream baseline：`codex-gpt6-lite` 的 contextWindow 旧断言（272000 vs 1050000）；Provider baseline 的 Codex CLI header 版本滞后；另有 Provider Header UI 对 TinyFish search/fetch 不生效的 upstream P2。
 - `feat/combo-health-fallback` 已于 2026-10-02 fast-forward 到 `efe37df7`；同日完成宿主机最终部署，`9r-deploy.sh` exit 0，launchd / 宿主机 `/v1/models` / new-api 跨容器访问 / SQLite `journal_mode=delete` / 运行日志检查全部通过。
 
+### 4.1.4 2026-10-09 同步记录（v0.5.95 → v0.5.99）
+
+- 上游：`a99cf572` → `ce4460ef79382bfddb4aa5fc0ff9f3cb0d5f95a8`（v0.5.99，2026-10-08），29 commits / 163 changed files；本次按确切 SHA 同步，未依赖尚未更新的 Git tag。
+- 隔离验证：`sync-upstream-1009-v0.5.99`，使用独立 Git worktree，未修改生产 `.next` 或重启 launchd。
+- **tested code merge**：`60a647f27e7f632dd6bdaa2eaf4a2080a3abacb0`，双父 `aa8ff01b` + `ce4460ef`；7 个双方修改文件，只有 `src/sse/handlers/chat.js` 出现 2 处实际文本冲突。
+- 冲突融合：保留 fork 的 `resolveComboStrategy()` / Combo Health 和所有 provenance 字段，接入上游 `enforceKeyAccess()` / `filterAdapterModels()`，确保 API Key 白名单在模型/Combo 请求入口生效，并限制扩展的 capacity adapter 模型。
+- **数据库门禁**：本 fork 和上游都已使用 `SCHEMA_VERSION=2`，但修改内容不同；合并后改为 `3`，保证已记录 v2 的数据库在增列 `apiKeys.accessRestricted/accessAllow` 前执行 schema 备份。保留 `DELETE/FULL/mmap_size=0`，新增 v2→v3 实际迁移/备份单测。
+- 上游重点：Bedrock (含 AWS SSO)、Antigravity Gemini 3.8 与 Claude 5.5、Hermes 多 profile、API Key 访问隔离、MiniMax Code、Netlify Relay、Kimi Responses 等。
+- 定向门禁：API Key/Combo/数据库迁移相关 4 files / **61 tests PASS**；原扩大高风险组合 58 files / 483 pass、4 fail，经对照其中 2 项为长期 Combo baseline，其余为 GLM 1M 与 Schema v3 的旧断言，均已修正。
+- **full-unit 差集**：sync 67 failed files / 85 failed tests / 2980 passed / 24 pending；官方 v0.5.99 同机 baseline 69 failed files / 87 failed tests / 2921 passed / 24 pending。按失败用例标识对比 **NEW REGRESSIONS=0；FIXED=2**（GLM Combo context 断言、DB mixed concurrent）。
+- `npm run build` PASS；独立进程 `127.0.0.1:23129` + 临时 DATA_DIR smoke PASS（`/v1/models` 814 项、SQLite `quick_check=ok`、`journal_mode=delete`、日志 `malformed=0`），进程和临时数据已清理。
+- 独立 Codex **只读静态 review**：未发现本次融合新增的 P0/P1/P2；其 Vitest 尝试因只读沙箱禁止写入临时目录未执行，真实单测由 Runner 独立执行并完成差集比较。
+- 已知 upstream baseline：Alias、Provider 快照仍滞后，官方同 SHA 验证同样失败（含 Codex CLI header、Kimi Responses、MiniMax Code）；OAuth URL PASS。不得把这些历史失败描述成全量绿灯。
+- **同步 ≠ 部署**：正式分支推进后，运行服务仍使用 2026-10-02 部署的 v0.5.95 产物；仅在另行从 `feat/combo-health-fallback` 执行 `9r-deploy.sh` 并验证 5 项 live smoke 后才能标记 v0.5.99 已上线。
+
 ### 4.2 高频冲突文件预判
 
 以下文件是本 fork 改动最集中的地方，上游若动同区域必然冲突：
@@ -398,7 +413,7 @@ npm run build
 
 **分支名：** `feat/combo-health-fallback`
 
-**基于：** upstream/master `a99cf572` / v0.5.95 (2026-10-01) + fork 定制；tested code merge=`efe37df7`；2026-10-02 已部署并通过 5 项 smoke 验证
+**基于：** upstream/master `ce4460ef` / v0.5.99 (2026-10-08) + fork 定制；tested code merge=`60a647f2`；本机正在运行的服务仍为 2026-10-02 部署的 v0.5.95，**v0.5.99 尚未部署**
 
 **领先 master：** 动态查询：`git rev-list --count master..feat/combo-health-fallback`
 
