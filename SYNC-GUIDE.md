@@ -295,6 +295,17 @@ cd ~/tujia_workspace/9router
 - **生产全量记录数对比**：切换前最新快照、切换后均为 `apiKeys=3` / `combos=3` / `providerConnections=14` / `usageHistory=13552` / `requestDetails=1000`。新旧 `.next/BUILD_ID` 不同，确认正式服务运行新构建。未认证的 Netlify 部署入口 HTTP 401（网关登录保护），认证后后端仍固定 403。
 - **结论**：v0.5.99 **已上线并完成真实库迁移验收**；本次未观察到数据损坏或记录丢失。数据库备份和旧版构建快照保留，不承诺任何软件升级绝对零风险。
 
+### 4.1.6 2026-10-16 v0.5.104 同步准备与融合验证
+
+- **上游版本**：`upstream/master @ 87a74e1b` / v0.5.104（2026-10-15），相对当前 v0.5.99 定制分支新增 **38 commits**；在独立分支 `sync-upstream-1016-v0.5.104` 执行 `--no-ff` 合并准备。
+- **冲突**：仅 `open-sse/services/combo.js` 1 处文本冲突。融合时同时保留 fork 的 `comboHealthState`/cooling/请求级安全拒绝处理和上游新增的“HTTP 200 但 zero usable content 时继续 fallback”。由于 fork 会先过滤 cooling seat，最后节点判断必须使用 `attemptModels.length`，不能照搬 upstream 的 `rotatedModels.length`；已补回归测试锁定该场景。
+- **Codex 路由**：v0.5.104 上游移除 `gpt-5.5`/`gpt-5.5-review`/对应 image 等退役模型。fork 继续采用“真实 Codex registry 精确白名单”路由裸 model id，而不是上游宽泛 `gpt-5.x/6.x` 正则；测试改为直接调用真实路由，确认退役 `gpt-5.5` 与非 Codex `gpt-5.4` 回 OpenAI，`gpt-5.6-*`、`gpt-6-astra`、daybreak/reserve、`codex-auto-review` 仍走 Codex OAuth。
+- **安全/数据不变量**：`src/lib/db/schema.js` 仍为 `journal_mode=DELETE` + `synchronous=FULL` + `mmap_size=0`；默认 TLS 证书校验仍严格，仅显式 `STRICT_SSL=false/0` 才允许 insecure retry；Netlify Relay 新建入口仍被 fork 禁用。
+- **定向门禁**：Combo health/fallback/strategy/content-filter/caps、Codex registry/auto-review、TLS、strictProxy/Cursor、Netlify Relay 共 **11 files / 96 tests PASS**。
+- **full-unit 基线对照**：融合分支同机运行结果为 **36 failed files / 88 failed tests / 3630 passed**；纯 `upstream/master @ 87a74e1b` 同环境为 **37 failed files / 90 failed tests / 3570 passed**。两者均存在上游测试基线问题（含 translator/Windsurf/Kiro timeout 等），因此不得写成“全量绿灯”；本次高风险定向门禁无新增失败。
+- **build**：`npm run build` PASS；随后使用临时 `DATA_DIR` 隔离真实运行库再次构建，**exit 0 且无 DB lock 警告**。第一次未隔离构建虽 exit 0，但读取了 `~/.9router/db/data.sqlite` 并出现 lock/备份警告，故不作为干净验收证据。
+- **状态**：截至本节记录时仅完成同步分支融合与验证，**尚未合回 `feat/combo-health-fallback`，尚未部署 v0.5.104**。正式部署仍需从最终定制分支执行 `9r-deploy.sh` 并完成 live smoke/DB 校验。
+
 ### 4.2 高频冲突文件预判
 
 以下文件是本 fork 改动最集中的地方，上游若动同区域必然冲突：

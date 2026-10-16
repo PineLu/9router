@@ -41,6 +41,18 @@ describe("Codex registry — ghost models removed (#4202)", () => {
   it("gpt-5.4-image is removed", () => {
     expect(codexSrc).not.toMatch(/id:\s*"gpt-5\.4-image"/);
   });
+
+  it("gpt-5.5 is removed", () => {
+    expect(codexSrc).not.toMatch(/id:\s*"gpt-5\.5"/);
+  });
+
+  it("gpt-5.5-image is removed", () => {
+    expect(codexSrc).not.toMatch(/id:\s*"gpt-5\.5-image"/);
+  });
+
+  it("gpt-5.3-image is removed", () => {
+    expect(codexSrc).not.toMatch(/id:\s*"gpt-5\.3-image"/);
+  });
 });
 
 describe("Codex registry — new models added (#4202)", () => {
@@ -54,8 +66,8 @@ describe("Codex registry — new models added (#4202)", () => {
 });
 
 describe("Codex registry — still-live models kept (#4202 regression guard)", () => {
-  it("gpt-5.5 still present", () => {
-    expect(codexSrc).toContain('"gpt-5.5"');
+  it("gpt-5.6-sol still present", () => {
+    expect(codexSrc).toContain('"gpt-5.6-sol"');
   });
 
   it("gpt-5.6-terra still present", () => {
@@ -67,84 +79,34 @@ describe("Codex registry — still-live models kept (#4202 regression guard)", (
   });
 });
 
-// ── #4405 Model prefix routing ───────────────────────────────────────────────
-// Replicate MODEL_PREFIX_PROVIDERS logic from open-sse/services/model.js
+// ── #4405 Bare-model routing ─────────────────────────────────────────────────
+// Exercise the real router rather than duplicating its regexes here. The fork
+// intentionally routes only model ids that are present in the Codex registry
+// through Codex OAuth; retired/unknown GPT ids fall back to OpenAI.
 
-const MODEL_PREFIX_PROVIDERS = [
-  [/^codex-auto-review$/, "codex"],
-  [/^gpt-[56]\./, "codex"],
-  [/^gpt-6-/, "codex"],
-  [/^gpt-daybreak-/, "codex"],
-  [/^gpt-reserve/, "codex"],
-  [/^claude-/, "anthropic"],
-  [/^gemini-/, "gemini"],
-  [/^gpt-/, "openai"],
-  [/^o[134]/, "openai"],
-  [/^deepseek-/, "openrouter"],
-];
-
-function inferProvider(modelName) {
-  if (!modelName) return "openai";
-  const m = modelName.toLowerCase();
-  return MODEL_PREFIX_PROVIDERS.find(([re]) => re.test(m))?.[1] || "openai";
+async function expectBareProvider(model, provider) {
+  await expect(getModelInfoCore(model, {})).resolves.toEqual({ provider, model });
 }
 
-describe("inferProviderFromModelName — Codex gpt-* models route to codex (#4405)", () => {
-  it("gpt-5.6-terra → codex", () => {
-    expect(inferProvider("gpt-5.6-terra")).toBe("codex");
+describe("bare model routing — Codex registry ids only (#4405)", () => {
+  it("routes live Codex ids through Codex OAuth", async () => {
+    await expectBareProvider("gpt-5.6-terra", "codex");
+    await expectBareProvider("gpt-5.6-sol", "codex");
+    await expectBareProvider("gpt-6-astra", "codex");
+    await expectBareProvider("gpt-daybreak-blue-latest", "codex");
+    await expectBareProvider("gpt-reserve", "codex");
+    await expectBareProvider("codex-auto-review", "codex");
   });
 
-  it("gpt-5.6-sol → codex", () => {
-    expect(inferProvider("gpt-5.6-sol")).toBe("codex");
+  it("keeps retired or non-Codex GPT ids on OpenAI", async () => {
+    await expectBareProvider("gpt-5.5", "openai");
+    await expectBareProvider("gpt-5.4", "openai");
+    await expectBareProvider("gpt-4o", "openai");
+    await expectBareProvider("gpt-4-turbo", "openai");
+    await expectBareProvider("gpt-3.5-turbo", "openai");
   });
 
-  it("gpt-5.5 → codex", () => {
-    expect(inferProvider("gpt-5.5")).toBe("codex");
-  });
-
-  it("gpt-5.4 remains OpenAI because it is absent from the Codex registry", async () => {
-    await expect(getModelInfoCore("gpt-5.4", {})).resolves.toEqual({
-      provider: "openai",
-      model: "gpt-5.4",
-    });
-  });
-
-  it("gpt-5.6-terra still resolves through the actual Codex registry path", async () => {
-    await expect(getModelInfoCore("gpt-5.6-terra", {})).resolves.toEqual({
-      provider: "codex",
-      model: "gpt-5.6-terra",
-    });
-  });
-
-  it("gpt-6-astra → codex", () => {
-    expect(inferProvider("gpt-6-astra")).toBe("codex");
-  });
-
-  it("gpt-daybreak-blue-latest → codex", () => {
-    expect(inferProvider("gpt-daybreak-blue-latest")).toBe("codex");
-  });
-
-  it("gpt-reserve → codex", () => {
-    expect(inferProvider("gpt-reserve")).toBe("codex");
-  });
-
-  it("gpt-4o → openai (standard model not affected)", () => {
-    expect(inferProvider("gpt-4o")).toBe("openai");
-  });
-
-  it("gpt-4-turbo → openai (standard model not affected)", () => {
-    expect(inferProvider("gpt-4-turbo")).toBe("openai");
-  });
-
-  it("gpt-3.5-turbo → openai (standard model not affected)", () => {
-    expect(inferProvider("gpt-3.5-turbo")).toBe("openai");
-  });
-
-  it("claude-opus-5 → anthropic (regression guard)", () => {
-    expect(inferProvider("claude-opus-5")).toBe("anthropic");
-  });
-
-  it("codex-auto-review → codex (regression guard)", () => {
-    expect(inferProvider("codex-auto-review")).toBe("codex");
+  it("keeps non-GPT prefix routing intact", async () => {
+    await expectBareProvider("claude-opus-5", "anthropic");
   });
 });

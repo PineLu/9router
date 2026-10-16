@@ -153,4 +153,33 @@ describe("combo health fallback (failure memory)", () => {
     expect(r3.ok).toBe(true);
     expect(calls.length).toBeGreaterThan(3);
   });
+
+  it("treats the last available model as final after cooling models are filtered", async () => {
+    recordComboFailure("c7", "p/cooling", 404, "model not found");
+
+    const calls = [];
+    const handleSingleModel = async (_body, model) => {
+      calls.push(model);
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: "" }, finish_reason: "in_progress" }],
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const result = await handleComboChat({
+      body: {},
+      models: ["p/cooling", "p/last"],
+      handleSingleModel,
+      log: quietLog(),
+      comboName: "c7",
+    });
+
+    expect(calls).toEqual(["p/last"]);
+    expect(result.ok).toBe(true);
+    expect(await result.json()).toEqual({
+      choices: [{ message: { content: "" }, finish_reason: "in_progress" }],
+    });
+  });
 });
