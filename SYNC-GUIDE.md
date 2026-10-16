@@ -306,6 +306,15 @@ cd ~/tujia_workspace/9router
 - **build**：`npm run build` PASS；随后使用临时 `DATA_DIR` 隔离真实运行库再次构建，**exit 0 且无 DB lock 警告**。第一次未隔离构建虽 exit 0，但读取了 `~/.9router/db/data.sqlite` 并出现 lock/备份警告，故不作为干净验收证据。
 - **状态**：截至本节记录时仅完成同步分支融合与验证，**尚未合回 `feat/combo-health-fallback`，尚未部署 v0.5.104**。正式部署仍需从最终定制分支执行 `9r-deploy.sh` 并完成 live smoke/DB 校验。
 
+### 4.1.7 2026-10-16 v0.5.104 正式部署与生产验收
+
+- **部署代码**：`feat/combo-health-fallback @ cf284ff1b720c11ebb8b5ee25899d1cb8e33b8b8`；该提交已 fast-forward 到正式定制分支并 push 到 origin，完整包含 `upstream/master @ 87a74e1b` / v0.5.104。
+- **升级前门禁**：生产 launchd 正常；SQLite `journal_mode=delete`、`quick_check=ok`、`integrity_check=ok`。使用 SQLite 在线 `.backup` 生成一致性备份，并保留认证/本机标识和上一版 `.next` 构建快照；备份库再次验证 `delete/ok/ok`。
+- **部署**：执行 `./9r-deploy.sh`，完整 build → launchd restart → 5 项 smoke **exit 0**。新 launchd PID=`77979`；宿主机 `/v1/models` 正常；new-api 可通过 `host.containers.internal:20128` 跨容器访问；`journal_mode=delete`；近 100 行日志 `malformed=0`。
+- **深校验**：`/api/version` 返回 `currentVersion=0.5.104`、`latestVersion=0.5.104`、`hasUpdate=false`；生产库 `quick_check=ok`、`integrity_check=ok`，且不存在 `data.sqlite-wal/-shm`。
+- **数据对账**：升级前一致性备份与升级后生产库关键表计数完全一致：`apiKeys=3`、`combos=3`、`providerConnections=14`、`usageHistory=18391`、`requestDetails=1000`；`backupSchemaVersion=3`，`appVersion=0.5.104`。
+- **结论**：v0.5.104 **已正式上线并通过生产验收**；未观察到关键表记录丢失、SQLite 完整性异常或 WAL 回退。升级前私有备份保留作为回滚依据。
+
 ### 4.2 高频冲突文件预判
 
 以下文件是本 fork 改动最集中的地方，上游若动同区域必然冲突：
@@ -435,7 +444,7 @@ npm run build
 
 **分支名：** `feat/combo-health-fallback`
 
-**基于：** upstream/master `ce4460ef` / v0.5.99 (2026-10-08) + fork 定制；tested code merge=`60a647f2`，安全修复及上线代码 `cc55371e`；**2026-10-09 已正式部署 v0.5.99**（详见 §4.1.5）
+**基于：** upstream/master `87a74e1b` / v0.5.104 (2026-10-15) + fork 定制；当前正式分支/上线代码 `cf284ff1`；**2026-10-16 已正式部署 v0.5.104**（详见 §4.1.7）
 
 **领先 master：** 动态查询：`git rev-list --count master..feat/combo-health-fallback`
 
