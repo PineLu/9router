@@ -327,6 +327,16 @@ cd ~/tujia_workspace/9router
 - **SQLite 与安全不变量**：`journal_mode=DELETE`、`synchronous=FULL`、`mmap_size=0` 未被覆盖；Netlify Relay 后端依旧固定 403；TLS insecure retry 仅显式 `STRICT_SSL=false/0` 且没有 `strictTls=true` 才触发。
 - **状态**：本节记录为源码同步/集成验收，**不是生产部署记录**。线上 v0.5.104 仍需维持至另行备份并执行完整部署验证后，才能宣称 v0.5.111 已上线。
 
+### 4.1.9 2026-10-27 v0.5.111 正式部署及生产验收
+
+- **发布代码**：正式分支 `feat/combo-health-fallback @ db162e41`，其中上游双父融合提交为 `014840f1`（上游 v0.5.111 `3a978a63`）。部署前工作区 clean、已 push。
+- **升级前数据库**：SQLite `journal_mode=delete`、`quick_check=ok`、`integrity_check=ok`；生产数据 `apiKeys=3`、`combos=3`、`providerConnections=14`、`usageHistory=19701`、`requestDetails=1000`。
+- **私有备份**：`~/.9router-upgrade-backups/pre-v05111-20261027-131256/`。使用 SQLite 在线 `.backup` 生成一致性数据库快照，核验 `delete/ok/ok`；另保留 v0.5.104 完整 `.next` 构建（原 BUILD_ID 已对上）、launchd plist 和必要的本机认证标识。备份限制为用户私有权限；不得上传公开仓库，也不得在确认无需回滚前删除。
+- **构建和部署**：在正式源目录 `npm install` 后以独立 `DATA_DIR=/tmp/9router-v05111-prod-build-20261027` 执行 `npm run build`，exit 0，含 Next.js 页面与 standalone 静态资产；构建不读取活跃 SQLite。随后执行 `./9r-deploy.sh --skip-build` 完成 launchd 重启及脚本内五项验证，**exit 0**。
+- **生产 live smoke**：新 launchd PID `89189`；宿主机 `/v1/models` 返回合法模型列表，new-api 经 `host.containers.internal:20128` 跨容器请求通过；近 100 行日志 `malformed=0`。`/api/version` 报告 `currentVersion=latestVersion=0.5.111`、`hasUpdate=false`，构建 BUILD_ID 为 `KNQyRVXgjFt7I3EElG7Gs`。
+- **数据安全深验**：升级后 SQLite `journal_mode=delete`、`quick_check=ok`、`integrity_check=ok`，无 `data.sqlite-wal/-shm`；`backupSchemaVersion=3`、`appVersion=0.5.111`。升级前在线备份与升级后生产库关键五表计数逐一一致：3/3/14/19701/1000，未见历史记录丢失或 WAL 模式回潮。
+- **结论**：v0.5.111 **已正式上线，生产验收通过**。全量单测中与上游同环境基线比较仍存在既有失败（见 §4.1.8），不能据此承诺所有 Provider 场景均已完成真实流量回归。升级前私有备份保留以便回滚。
+
 ### 4.2 高频冲突文件预判
 
 以下文件是本 fork 改动最集中的地方，上游若动同区域必然冲突：
@@ -456,7 +466,7 @@ npm run build
 
 **分支名：** `feat/combo-health-fallback`
 
-**源码基于：** upstream/master `3a978a63` / v0.5.111 (2026-10-26) + fork 定制；融合提交 `014840f1` 已于 2026-10-27 合入并推送。**线上服务仍运行 2026-10-16 部署的 v0.5.104**，升级前必须另行备份并执行部署验收（见 §4.1.7–4.1.8）。
+**源码基于：** upstream/master `3a978a63` / v0.5.111 (2026-10-26) + fork 定制；融合提交 `014840f1`，实际部署源码 `db162e41`。**2026-10-27 已正式部署 v0.5.111 并通过生产验收**（详见 §4.1.8–4.1.9）；此前 v0.5.104 旧构建和 SQLite 快照仍保留作回滚。
 
 **领先 master：** 动态查询：`git rev-list --count master..feat/combo-health-fallback`
 
