@@ -456,7 +456,7 @@ npm run build
 
 **分支名：** `feat/combo-health-fallback`
 
-**基于：** upstream/master `87a74e1b` / v0.5.104 (2026-10-15) + fork 定制；当前正式分支/上线代码 `cf284ff1`；**2026-10-16 已正式部署 v0.5.104**（详见 §4.1.7）
+**源码基于：** upstream/master `3a978a63` / v0.5.111 (2026-10-26) + fork 定制；融合提交 `014840f1` 已于 2026-10-27 合入并推送。**线上服务仍运行 2026-10-16 部署的 v0.5.104**，升级前必须另行备份并执行部署验收（见 §4.1.7–4.1.8）。
 
 **领先 master：** 动态查询：`git rev-list --count master..feat/combo-health-fallback`
 
