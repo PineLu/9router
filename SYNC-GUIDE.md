@@ -315,6 +315,18 @@ cd ~/tujia_workspace/9router
 - **数据对账**：升级前一致性备份与升级后生产库关键表计数完全一致：`apiKeys=3`、`combos=3`、`providerConnections=14`、`usageHistory=18391`、`requestDetails=1000`；`backupSchemaVersion=3`，`appVersion=0.5.104`。
 - **结论**：v0.5.104 **已正式上线并通过生产验收**；未观察到关键表记录丢失、SQLite 完整性异常或 WAL 回退。升级前私有备份保留作为回滚依据。
 
+### 4.1.8 2026-10-27 v0.5.111 隔离同步与融合验证
+
+- **来源**：上游 `upstream/master @ 3a978a63` / v0.5.111（2026-10-26），相对上次已部署 v0.5.104 新增 56 commits、298 files；包含 v0.5.109 的 Combo Smart Router、SSE 空响应降级、Web Providers，以及 v0.5.111 的 Codex Image、OpenCode/TLS、Ollama、Kimi K3.1 Pro 等更新。
+- **隔离**：在独立 Git worktree `sync-upstream-1027-v0.5.111` 内从 fork 正式基线 `94f67e98` 合并 `upstream/master`，依赖/Next 构建和测试均不复用或覆盖正式源码目录的 `.next`。整个准备阶段不重启线上服务。
+- **冲突**：实际 7 个文件发生文本冲突：`chatCore.js`、`accountFallback.js`、`combo.js`、`proxyFetch.js`、`stream.js`、Combo dashboard、`combo-caps-resolver` 测试。融合时保留 fork 的 `comboName` 透传、失败记忆与 cooling、CodeBuddy 11140 免锁账号、TLS 默认证书验证；同时吸收上游 Smart Router、request-scoped 4xx、SSE peek 及自定义 RTK 提示词。JSON 和 SSE 的最后一个可用节点均使用 `attemptModels.length`，新增 SSE cooling 回归。
+- **契约冲突修复**：上游 `checkFallbackError` 第 4 参数是 provider，fork 历史第 4 参数是 retryAfter；统一为 `(status, errorText, backoffLevel, provider, retryAfter)` 并调整 account/Combo 两处调用，保留上游 CodeBuddy Intl 11128 backoff 与 fork retry window。修正上游新测试对 `comboCtx` 第三参数、request-scoped 400、`requestScoped` 结果字段的过时断言。
+- **定向门禁**：首轮 15 files / 190 tests PASS；后续 CodeBuddy/Combo/SSE/TLS 6 files / 117 tests PASS。覆盖 Smart Router、Combo health/cooling、请求级拒绝、流式空响应、TLS 默认严格与 Netlify 安全禁用等。
+- **全量同环境基线**：融合分支第二轮 416 files、**4174 passed / 24 failed**；纯 upstream v0.5.111 为 410 files、**4120 passed / 30 failed**，按失败用例标识对比 **新增失败 0**。遗留失败含 golden headers 快照、测试环境依赖/外部 live 测试，不应描述成全量绿灯。测试自动写入的 snapshot 修改已撤销，不纳入 fork 提交。
+- **build**：在 worktree 使用临时 `DATA_DIR` 完整 `npm run build` 两轮均 exit 0；静态页与 standalone 资产完成。生产数据不参与构建。
+- **SQLite 与安全不变量**：`journal_mode=DELETE`、`synchronous=FULL`、`mmap_size=0` 未被覆盖；Netlify Relay 后端依旧固定 403；TLS insecure retry 仅显式 `STRICT_SSL=false/0` 且没有 `strictTls=true` 才触发。
+- **状态**：本节记录为源码同步/集成验收，**不是生产部署记录**。线上 v0.5.104 仍需维持至另行备份并执行完整部署验证后，才能宣称 v0.5.111 已上线。
+
 ### 4.2 高频冲突文件预判
 
 以下文件是本 fork 改动最集中的地方，上游若动同区域必然冲突：

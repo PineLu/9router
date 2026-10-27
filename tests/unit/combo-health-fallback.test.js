@@ -182,4 +182,22 @@ describe("combo health fallback (failure memory)", () => {
       choices: [{ message: { content: "" }, finish_reason: "in_progress" }],
     });
   });
+  it("preserves the final non-cooling SSE response rather than exhausting the list", async () => {
+    recordComboFailure("c8", "p/cooling", 404, "model not found");
+    const calls = [];
+    const handleSingleModel = async (_body, model) => {
+      calls.push(model);
+      return new Response('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    };
+    const response = await handleComboChat({
+      body: { stream: true }, models: ["p/cooling", "p/last"], handleSingleModel,
+      comboName: "c8", log: quietLog(),
+    });
+    expect(calls).toEqual(["p/last"]);
+    expect(response.ok).toBe(true);
+    expect(await response.text()).toContain("[DONE]");
+  });
 });

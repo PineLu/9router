@@ -57,10 +57,17 @@ export function isRequestScopedSafetyError(status, errorText, provider = null) {
  * @param {number} status - HTTP status code
  * @param {string} errorText - Error message text
  * @param {number} backoffLevel - Current backoff level for exponential backoff
+ * @param {string|null} provider - Canonical provider ID for provider-scoped rules
  * @param {string|null} retryAfter - Optional ISO retry-after timestamp from upstream
- * @returns {{ shouldFallback: boolean, cooldownMs: number, newBackoffLevel?: number }}
+ * @returns {{ shouldFallback: boolean, cooldownMs: number, newBackoffLevel?: number, requestScoped?: boolean }}
+ *
+ * `shouldFallback` answers "is the CREDENTIAL at fault?" (account rotation).
+ * `requestScoped` answers "is the REQUEST itself what this member rejected?"
+ * (combo rotation). They are different questions: a context overflow or a
+ * validation 400 means the credential is healthy but this member cannot serve
+ * this request, so combo rotation must still try the next member.
  */
-export function checkFallbackError(status, errorText, backoffLevel = 0, retryAfter = null, provider = null) {
+export function checkFallbackError(status, errorText, backoffLevel = 0, provider = null, retryAfter = null) {
   const lowerError = errorText
     ? (typeof errorText === "string" ? errorText : JSON.stringify(errorText)).toLowerCase()
     : "";
@@ -107,7 +114,7 @@ export function checkFallbackError(status, errorText, backoffLevel = 0, retryAft
   // credential health. Preserve upstream v0.5.81 semantics while keeping our
   // provider retry-window handling above.
   if (status >= 400 && status < 500 && status !== 401 && status !== 402 && status !== 403 && status !== 429) {
-    return { shouldFallback: false, cooldownMs: 0 };
+    return { shouldFallback: false, cooldownMs: 0, requestScoped: true };
   }
 
   // Default: transient cooldown for any unmatched error

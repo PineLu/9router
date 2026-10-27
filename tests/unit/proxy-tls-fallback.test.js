@@ -37,6 +37,16 @@ describe("proxy TLS certificate fallback", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("does not downgrade a per-request strictTls transport even if global opt-in is false", async () => {
+    process.env.STRICT_SSL = "false";
+    const err = tlsCertError();
+    const fetchMock = vi.fn().mockRejectedValue(err);
+    const { proxyAwareFetch } = await loadWithFetch(fetchMock);
+
+    await expect(proxyAwareFetch("https://example.test/v1/chat", { strictTls: true })).rejects.toBe(err);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("allows the insecure retry only when STRICT_SSL=false is explicit", async () => {
     process.env.STRICT_SSL = "false";
     const err = tlsCertError();

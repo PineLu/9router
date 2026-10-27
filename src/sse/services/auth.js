@@ -271,7 +271,7 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
     // provider id so provider-scoped fallback rules (for example Codex) match.
     const retryAfterIso = resetsAtMs && resetsAtMs > Date.now() ? new Date(resetsAtMs).toISOString() : null;
     ({ shouldFallback, cooldownMs, newBackoffLevel } = checkFallbackError(
-      status, errorText, backoffLevel, retryAfterIso, resolveProviderId(provider)
+      status, errorText, backoffLevel, resolveProviderId(provider), retryAfterIso
     ));
   }
   if (!shouldFallback) return { shouldFallback: false, cooldownMs: 0 };
