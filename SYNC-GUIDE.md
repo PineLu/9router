@@ -337,6 +337,17 @@ cd ~/tujia_workspace/9router
 - **数据安全深验**：升级后 SQLite `journal_mode=delete`、`quick_check=ok`、`integrity_check=ok`，无 `data.sqlite-wal/-shm`；`backupSchemaVersion=3`、`appVersion=0.5.111`。升级前在线备份与升级后生产库关键五表计数逐一一致：3/3/14/19701/1000，未见历史记录丢失或 WAL 模式回潮。
 - **结论**：v0.5.111 **已正式上线，生产验收通过**。全量单测中与上游同环境基线比较仍存在既有失败（见 §4.1.8），不能据此承诺所有 Provider 场景均已完成真实流量回归。升级前私有备份保留以便回滚。
 
+### 4.1.10 2026-10-30 v0.5.112 隔离同步及合并验收
+
+- **来源与规模**：`upstream/master @ 1fe586bb` / v0.5.112（2026-10-28），相对线上 v0.5.111 上游增加 14 commits、48 files；Codex `gpt-6.1-terra`、CodeBuddy CN/Intl 官方插件请求头、MiniMax Code 桌面 Lease、新 Nace Drex、CommandCode CLI 1.88.0 header、非流式 SSE error status、Web Provider lazy runtime、Gemini/NVIDIA/DeepSeek 兼容修复等。
+- **隔离方法**：从正式分支 `feat/combo-health-fallback @ d5d3c8a5` 创建独立 worktree `sync-upstream-1030-v0.5.112`，执行 `git merge --no-ff upstream/master`。本轮准备不在主目录执行 build/merge，不重启 launchd、不访问生产 DB。
+- **冲突**：只有 `tests/unit/codebuddy-block-backoff.test.js` 1 个文件、2 处文本冲突，系同一测试的命名/断言位置不同；采用上游含完整解释的测试，不改变功能语义。`nonStreamingHandler.js` 自动保留 fork 的 `content_filter/refusal` 检测和 `comboName` 使用量记录，并合入上游非流式 SSE error status 透传；`dashboardGuard.js` 同时保留请求详情高敏感路径保护和 MiniMax Lease 路径限制。
+- **定向门禁**：CodeBuddy（11128、11140、插件 header）、Codex registry/Terra、SSE error、Combo cooling/Smart Router、TLS、Dashboard Guard、Netlify、MiniMax Lease、Nace、Gemini schema 和 CommandCode headers：**21 files / 304 tests PASS**。
+- **全量与纯上游基线**：同环境、同依赖、独立 `DATA_DIR` 下，融合分支 **423 files，4277 passed / 26 failed**；纯 upstream v0.5.112 **417 files，4226 passed / 27 failed**。按失败用例标识比较新增失败 **0**。仍有原本存在的失败，不能声称全量绿灯；自动生成的 golden snapshot 已撤销，不作为正式改动。
+- **构建**：隔离 worktree `DATA_DIR=/tmp/9router-v05112-build-data npm run build` **exit 0**，Next.js/standalone 正常，未触碰正式服务源目录的 `.next`。
+- **不变量**：`src/lib/db/schema.js` 仍为 `journal_mode=DELETE`、`synchronous=FULL`、`mmap_size=0`；Netlify Relay 新建端点仍固定 403；TLS 默认证书验证及 Combo health/cooling 逻辑未被本轮上游改动覆盖。
+- **状态**：本节仅记录源码同步和集成验收；**不等于 v0.5.112 已部署**。线上仍是 v0.5.111。正式部署需另行备份当前 SQLite 与旧 `.next`，执行部署脚本与生产 smoke/数据对账。
+
 ### 4.2 高频冲突文件预判
 
 以下文件是本 fork 改动最集中的地方，上游若动同区域必然冲突：
@@ -466,7 +477,7 @@ npm run build
 
 **分支名：** `feat/combo-health-fallback`
 
-**源码基于：** upstream/master `3a978a63` / v0.5.111 (2026-10-26) + fork 定制；融合提交 `014840f1`，实际部署源码 `db162e41`。**2026-10-27 已正式部署 v0.5.111 并通过生产验收**（详见 §4.1.8–4.1.9）；此前 v0.5.104 旧构建和 SQLite 快照仍保留作回滚。
+**源码同步目标：** upstream/master `1fe586bb` / v0.5.112 (2026-10-28) + fork 定制；本次在独立 sync worktree 验收通过，详见 §4.1.10。**线上版本仍为 v0.5.111**（2026-10-27 正式部署，详见 §4.1.9），未经备份和生产验收不得描述为 v0.5.112 已上线。
 
 **领先 master：** 动态查询：`git rev-list --count master..feat/combo-health-fallback`
 
