@@ -346,7 +346,8 @@ cd ~/tujia_workspace/9router
 - **全量与纯上游基线**：同环境、同依赖、独立 `DATA_DIR` 下，融合分支 **423 files，4277 passed / 26 failed**；纯 upstream v0.5.112 **417 files，4226 passed / 27 failed**。按失败用例标识比较新增失败 **0**。仍有原本存在的失败，不能声称全量绿灯；自动生成的 golden snapshot 已撤销，不作为正式改动。
 - **构建**：隔离 worktree `DATA_DIR=/tmp/9router-v05112-build-data npm run build` **exit 0**，Next.js/standalone 正常，未触碰正式服务源目录的 `.next`。
 - **不变量**：`src/lib/db/schema.js` 仍为 `journal_mode=DELETE`、`synchronous=FULL`、`mmap_size=0`；Netlify Relay 新建端点仍固定 403；TLS 默认证书验证及 Combo health/cooling 逻辑未被本轮上游改动覆盖。
-- **状态**：本节仅记录源码同步和集成验收；**不等于 v0.5.112 已部署**。线上仍是 v0.5.111。正式部署需另行备份当前 SQLite 与旧 `.next`，执行部署脚本与生产 smoke/数据对账。
+- **Git 收尾**：标准双父 merge commit `6414940e`（父提交：fork `d5d3c8a5`、upstream `1fe586bb`），已 fast-forward 合入 `feat/combo-health-fallback` 并 push 到 `origin`，同步审计 worktree/branch 保留。
+- **状态**：v0.5.112 **源码已同步并推送，但尚未部署**；线上仍是 v0.5.111。正式部署需另行备份当前 SQLite 与旧 `.next`，执行部署脚本与生产 smoke/数据对账。
 
 ### 4.2 高频冲突文件预判
 
@@ -477,7 +478,7 @@ npm run build
 
 **分支名：** `feat/combo-health-fallback`
 
-**源码同步目标：** upstream/master `1fe586bb` / v0.5.112 (2026-10-28) + fork 定制；本次在独立 sync worktree 验收通过，详见 §4.1.10。**线上版本仍为 v0.5.111**（2026-10-27 正式部署，详见 §4.1.9），未经备份和生产验收不得描述为 v0.5.112 已上线。
+**当前正式分支源码：** upstream/master `1fe586bb` / v0.5.112 (2026-10-28) + fork 定制；双父融合提交 `6414940e` 已合入正式分支并 push（详见 §4.1.10）。**线上版本仍为 v0.5.111**（2026-10-27 正式部署，详见 §4.1.9），未经备份和生产验收不得描述为 v0.5.112 已上线。
 
 **领先 master：** 动态查询：`git rev-list --count master..feat/combo-health-fallback`
 
