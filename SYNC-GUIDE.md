@@ -349,6 +349,16 @@ cd ~/tujia_workspace/9router
 - **Git 收尾**：标准双父 merge commit `6414940e`（父提交：fork `d5d3c8a5`、upstream `1fe586bb`），已 fast-forward 合入 `feat/combo-health-fallback` 并 push 到 `origin`，同步审计 worktree/branch 保留。
 - **状态**：v0.5.112 **源码已同步并推送，但尚未部署**；线上仍是 v0.5.111。正式部署需另行备份当前 SQLite 与旧 `.next`，执行部署脚本与生产 smoke/数据对账。
 
+### 4.1.11 2026-10-30 v0.5.112 正式部署和生产验收
+
+- **发布源码**：`feat/combo-health-fallback @ 58b5b51d`，包含双父融合提交 `6414940e` 和上游 `1fe586bb`；部署前 Git clean、与 origin 一致。与 §4.1.10 的源码合并验证区分，本节是正式上线记录。
+- **预检**：线上 v0.5.111，launchd 正常；生产 SQLite `journal_mode=delete`、`quick_check=ok`、`integrity_check=ok`。当时关键表：`apiKeys=3`、`combos=3`、`providerConnections=13`、`usageHistory=19705`、`requestDetails=1000`。其中 providerConnections 比 10 月 27 日的 14 条少一条，是本次升级前即存在的状态，不能归因于 v0.5.112。
+- **备份**：`~/.9router-upgrade-backups/pre-v05112-20261030-134349/`。使用 SQLite 在线 `.backup` 制作一致性 DB 快照，备份库 `journal_mode=delete`、`quick_check=ok`、`integrity_check=ok`；另保留 v0.5.111 的完整 `.next` 构建（原 BUILD_ID `KNQyRVXgjFt7I3EElG7Gs`，已比对）、launchd plist、必要本地凭据与机器标识。目录为用户私有权限；不要公开、上传或提前删除。
+- **构建与切换**：正式源码目录 `npm install` 完成；以独立 `DATA_DIR=/tmp/9router-v05112-prod-build-20261030` 执行 `npm run build` exit 0，隔离生产 SQLite。新 BUILD_ID `HQex9k3MIvAJKs8fmlS-A`。仅在备份/新构建/数据库检查门禁通过后，执行 `./9r-deploy.sh --skip-build` 重启 launchd，脚本 exit 0，新 PID `23853`。
+- **真实请求验收**：宿主机 `/v1/models` 与 new-api 容器通过 `host.containers.internal:20128` 跨容器访问均 PASS；近 100 行日志 `malformed=0`；`/api/version` 返回 `currentVersion=latestVersion=0.5.112`、`hasUpdate=false`。
+- **数据完整性与对账**：升级后的生产 SQLite `journal_mode=delete`、`quick_check=ok`、`integrity_check=ok`，无 `data.sqlite-wal/-shm`；`appVersion=0.5.112`、`backupSchemaVersion=3`。五张关键表与升级前在线备份完全一致：`3/3/13/19705/1000`。没有观察到数据丢失、SQLite 损坏或 WAL 回潮。
+- **结论**：v0.5.112 **已正式部署并通过当前生产验收**。融合阶段全量测试存在与 upstream 同环境一致的既有失败（§4.1.10），不代表所有 Provider 端到端请求已全部实测。
+
 ### 4.2 高频冲突文件预判
 
 以下文件是本 fork 改动最集中的地方，上游若动同区域必然冲突：
@@ -478,7 +488,7 @@ npm run build
 
 **分支名：** `feat/combo-health-fallback`
 
-**当前正式分支源码：** upstream/master `1fe586bb` / v0.5.112 (2026-10-28) + fork 定制；双父融合提交 `6414940e` 已合入正式分支并 push（详见 §4.1.10）。**线上版本仍为 v0.5.111**（2026-10-27 正式部署，详见 §4.1.9），未经备份和生产验收不得描述为 v0.5.112 已上线。
+**当前正式分支/线上版本：** upstream/master `1fe586bb` / v0.5.112 (2026-10-28) + fork 定制；双父融合提交 `6414940e`，**实际上线源码 `58b5b51d`，2026-10-30 已正式部署 v0.5.112 并通过生产验收**（详见 §4.1.10–4.1.11）。上一版 v0.5.111 的一致性数据库备份和旧构建仍保留作回滚。
 
 **领先 master：** 动态查询：`git rev-list --count master..feat/combo-health-fallback`
 
