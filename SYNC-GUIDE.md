@@ -39,7 +39,7 @@ upstream  git@github.com:decolua/9router.git     # 上游官方
 
 | 分支 | 用途 |
 |---|---|
-| `master` | 跟踪上游，保持干净（2026-10-09 同步目标 `ce4460ef` / v0.5.99，与 upstream/master 一致） |
+| `master` | 跟踪上游，保持干净（2026-11-15 同步目标 `1855aa44` / v0.5.119；根应用版本与 CLI 版本独立） |
 | `feat/combo-health-fallback` | 开发分支，所有魔改都在这里（领先提交数用 `git rev-list --count master..feat/combo-health-fallback` 动态查询） |
 
 > ⚠️ **开发分支不合并回 master**（自用分支，见 §6 说明）。
@@ -359,6 +359,19 @@ cd ~/tujia_workspace/9router
 - **数据完整性与对账**：升级后的生产 SQLite `journal_mode=delete`、`quick_check=ok`、`integrity_check=ok`，无 `data.sqlite-wal/-shm`；`appVersion=0.5.112`、`backupSchemaVersion=3`。五张关键表与升级前在线备份完全一致：`3/3/13/19705/1000`。没有观察到数据丢失、SQLite 损坏或 WAL 回潮。
 - **结论**：v0.5.112 **已正式部署并通过当前生产验收**。融合阶段全量测试存在与 upstream 同环境一致的既有失败（§4.1.10），不代表所有 Provider 端到端请求已全部实测。
 
+### 4.1.12 2026-11-15 v0.5.119 上游同步与融合验证
+
+- **上游来源**：`upstream/master @ 1855aa44473e88feac9d3f131b9c0c5fc9706b68`，Git tag `v0.5.119`（2026-11-11）；相对 v0.5.112 基线 `1fe586bb` 新增 68 commits、193 files。覆盖 Claude Fable 5.2/Haiku 5.5 OAuth 实时目录、Gemini 4 Carbon/Argon 配额、CommandCode CLI 1.88.5 自动导入、Synthetic、ClinePass、Codex Image 2.6、OpenCode 代理池透传/429 重试、MiniMax Lease 用量、SSE/Translator/DeepSeek/NVIDIA 兼容修复等。
+- **版本管理**：按 `CLAUDE.md`，根应用与 CLI 独立版本。合并后根 `package.json=0.5.116`（上游未改），`cli/package.json=0.5.119`；不把 CLI tag 版本强行写入根应用。隔离运行时 `/api/version` 实测 `currentVersion=0.5.116`、npm latest `0.5.119`、`hasUpdate=true`。`cli:pack` 会在打包时同步 CLI 版本到 app package，本轮未运行 CLI pack，避免把打包副作用混入源码同步。
+- **隔离与融合**：从正式分支 `feat/combo-health-fallback @ d5e8c1f4` 创建独立 worktree/分支 `sync-upstream-1115-v0.5.119`（`../.webcodex-worktrees/9router-sync-upstream-1115-v0.5.119`），merge commit `3220c0d9`，双父为 fork `d5e8c1f4` 与 upstream `1855aa44`。上游与 fork 共改 6 个文件；实际文本冲突 2 个文件、3 个 conflict blocks，均逐块人工语义合并。
+- **冲突处理**：`open-sse/utils/proxyFetch.js` 采用上游 package-local `undici.fetch`、direct dispatcher、Happy Eyeballs 和 stale keep-alive fresh-socket retry；保留 fork TLS fail-closed 策略——只有 `STRICT_SSL=false/0` 显式 opt-in 且请求未设置 `strictTls` 才可 insecure fallback。`tests/unit/proxy-tls-fallback.test.js` 随 transport 改为 package-local undici 后同步改用 `vi.doMock("undici")`，3 项 TLS 策略测试通过。`RequestDetailsTab.js` 采用上游 `tokenDisplay.js`，移除重复 helper；保留 fork Combo 筛选/列、请求明细字段，并使用 `getOutputTokens` 兼容 Claude `output_tokens`。自动合并的 `accountFallback.js`、`stream.js`、`chatCore.js`、`proxy-pools/page.js` 均复核 fork 定制仍在。
+- **定制与安全门禁**：SQLite `journal_mode=DELETE` / `synchronous=FULL` / `mmap_size=0` 保留；CodeBuddy `403/11140` request-scoped 与 Retry-After parser 保留；Combo health/cooling、`comboName/requestedModel` 持久化、content-filter/refusal 不重试逻辑保留；Netlify Relay 部署 API 仍固定 HTTP 403、UI 显示 disabled（已有 Netlify 禁用测试）；`src/dashboardGuard.js` 与 `custom-server.js` 未被上游覆盖。
+- **定向回归**：17 个 Vitest 文件 **222 tests PASS**；NVIDIA Node test **6/6 PASS**；TLS fallback 独立 **3/3 PASS**。Vitest 使用仓库要求的 tests 独立包 Vitest 4.1.12；第一次误用 npx Vitest 5 的试跑不计入结果。全量测试自动生成的 fork Provider golden snapshot 已恢复，不作为本轮变更。非 UI 变更文件 targeted ESLint PASS。
+- **全量回归与纯上游对照**：同机、同 Node `v22.22.3`、同依赖版本、独立 `DATA_DIR`。融合分支 **1438 suites / 4627 passed / 48 failed / 101 pending**；纯 upstream `1855aa44` **1417 suites / 4576 passed / 49 failed / 101 pending**。按 `relative test path + fullName` 比较 **NEW REGRESSIONS=0，FIXED=1**（`combo-credit-fallback.test.js` 的 400 Bad request 用例）；融合分支新增 50 tests，全部通过。UI 两个文件 ESLint 共 6 个既有错误（`set-state-in-effect` 4 个、`react/no-unescaped-entities` 2 个），纯 upstream 同样 6 个，不是本次引入。
+- **构建**：Node `v22.22.3`、Next.js `16.4.6`，隔离 `DATA_DIR=/tmp/9router-v05119-prod-build-data` 执行 `npm run build` **exit 0**；BUILD_ID `w5LCJLUp1cIoDUQGtsgMF`，standalone server/static/public 资产齐全。
+- **隔离运行 smoke**：临时 `DATA_DIR=/tmp/9router-v05119-runtime-smoke-data` 启动 standalone 于 `127.0.0.1:20129`；`/api/version` 返回 `0.5.116 / 0.5.119 / hasUpdate=true`，`/v1/models` HTTP 200、881 models，`/dashboard` 返回未登录预期 307 跳转；临时 SQLite `journal_mode=delete`、`synchronous=2(FULL)`、`mmap_size=0`、`quick_check=ok`。未访问或修改生产 SQLite、`.next`、launchd。
+- **状态**：本节记录的是源码同步、测试和隔离构建验收，**不是生产部署记录**。生产服务仍为 v0.5.112（部署源码 `58b5b51d`）；须另行确认后备份生产 DB/旧构建，再部署并验收 v0.5.119。
+
 ### 4.2 高频冲突文件预判
 
 以下文件是本 fork 改动最集中的地方，上游若动同区域必然冲突：
@@ -488,7 +501,7 @@ npm run build
 
 **分支名：** `feat/combo-health-fallback`
 
-**当前正式分支/线上版本：** upstream/master `1fe586bb` / v0.5.112 (2026-10-28) + fork 定制；双父融合提交 `6414940e`，**实际上线源码 `58b5b51d`，2026-10-30 已正式部署 v0.5.112 并通过生产验收**（详见 §4.1.10–4.1.11）。上一版 v0.5.111 的一致性数据库备份和旧构建仍保留作回滚。
+**当前正式分支源码/线上版本：** 源码已同步至 upstream/master `1855aa44` / tag v0.5.119（根应用 `0.5.116`、CLI `0.5.119` 独立版本）并保留 fork 定制；融合提交 `3220c0d9`（详见 §4.1.12）。**线上仍运行 v0.5.112**，实际上线源码 `58b5b51d`（2026-10-30 部署验收）；v0.5.119 尚未部署，需另行执行生产备份与部署验收。
 
 **领先 master：** 动态查询：`git rev-list --count master..feat/combo-health-fallback`
 
