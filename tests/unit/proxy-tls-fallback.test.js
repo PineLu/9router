@@ -11,13 +11,25 @@ function tlsCertError() {
 
 async function loadWithFetch(fetchMock) {
   vi.resetModules();
-  globalThis.fetch = fetchMock;
+  class MockAgent {
+    constructor(options) {
+      this.options = options;
+    }
+  }
+  // proxyFetch now uses undici.fetch directly so its dispatcher always comes
+  // from the same undici package instance. Mock that transport, not global fetch.
+  vi.doMock("undici", () => ({
+    fetch: fetchMock,
+    Agent: MockAgent,
+    ProxyAgent: MockAgent,
+  }));
   return import("../../open-sse/utils/proxyFetch.js");
 }
 
 afterEach(() => {
   globalThis.fetch = realFetch;
   vi.restoreAllMocks();
+  vi.doUnmock("undici");
   vi.resetModules();
   if (originalStrictSsl === undefined) delete process.env.STRICT_SSL;
   else process.env.STRICT_SSL = originalStrictSsl;
