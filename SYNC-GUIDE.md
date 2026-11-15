@@ -370,7 +370,19 @@ cd ~/tujia_workspace/9router
 - **全量回归与纯上游对照**：同机、同 Node `v22.22.3`、同依赖版本、独立 `DATA_DIR`。融合分支 **1438 suites / 4627 passed / 48 failed / 101 pending**；纯 upstream `1855aa44` **1417 suites / 4576 passed / 49 failed / 101 pending**。按 `relative test path + fullName` 比较 **NEW REGRESSIONS=0，FIXED=1**（`combo-credit-fallback.test.js` 的 400 Bad request 用例）；融合分支新增 50 tests，全部通过。UI 两个文件 ESLint 共 6 个既有错误（`set-state-in-effect` 4 个、`react/no-unescaped-entities` 2 个），纯 upstream 同样 6 个，不是本次引入。
 - **构建**：Node `v22.22.3`、Next.js `16.4.6`，隔离 `DATA_DIR=/tmp/9router-v05119-prod-build-data` 执行 `npm run build` **exit 0**；BUILD_ID `w5LCJLUp1cIoDUQGtsgMF`，standalone server/static/public 资产齐全。
 - **隔离运行 smoke**：临时 `DATA_DIR=/tmp/9router-v05119-runtime-smoke-data` 启动 standalone 于 `127.0.0.1:20129`；`/api/version` 返回 `0.5.116 / 0.5.119 / hasUpdate=true`，`/v1/models` HTTP 200、881 models，`/dashboard` 返回未登录预期 307 跳转；临时 SQLite `journal_mode=delete`、`synchronous=2(FULL)`、`mmap_size=0`、`quick_check=ok`。未访问或修改生产 SQLite、`.next`、launchd。
-- **状态**：本节记录的是源码同步、测试和隔离构建验收，**不是生产部署记录**。生产服务仍为 v0.5.112（部署源码 `58b5b51d`）；须另行确认后备份生产 DB/旧构建，再部署并验收 v0.5.119。
+- **状态**：本节记录上游源码同步、融合、回归与隔离构建；生产部署及验收结果见 §4.1.13。
+
+### 4.1.13 2026-11-15 v0.5.119 融合源码正式部署与生产验收
+
+- **发布源码**：正式分支 `feat/combo-health-fallback @ 21224f2b9d16538450a025b9ff058f13e9416f73`，包含 upstream v0.5.119 双父融合提交 `3220c0d9`；部署前 Git 工作区 clean，HEAD 与 `origin/feat/combo-health-fallback` 一致。
+- **依赖基线校正**：正式目录残留的被 `.gitignore` 忽略的 `package-lock.json` 将 Next.js 固定在 `16.4.3`，与本轮已验收 worktree 使用的 `16.4.6` 不一致。先将原 lockfile 备份到发布备份目录，再复制已验收 worktree 的 lockfile 并 `npm ci`；Node `v22.22.3`、npm `10.9.8`，Next.js `16.4.6`、React `19.2.4`、undici `7.30.2` 与测试构建依赖一致。lockfile 未纳入 Git，旧版与验证版均保存在私有备份中。
+- **私有备份**：`~/.9router-upgrade-backups/pre-v05119-20261115-124204/`（目录权限 `700`，敏感文件 `600`，约 1.2GB）。使用 SQLite 在线 `.backup` 保存生产 `data.sqlite`，并核验备份库 `journal_mode=delete`、`quick_check=ok`、`integrity_check=ok`；保存旧 `.next`（BUILD_ID `HQex9k3MIvAJKs8fmlS-A`）、launchd plist、`jwt-secret`、`machine-id`、`auth/cli-secret`、原始及验证版 package-lock、发布 SHA、发布前 DB metadata 和表计数。禁止公开、上传或提前删除。
+- **构建**：正式源码目录在 `DATA_DIR=/tmp/9router-v05119-prod-build-20261115-124204` 下执行 `npm run build`，exit 0；BUILD_ID `v2yjQC8rvn5__KId2hMYp`，standalone server/custom-server/static/public 资产齐全。随后使用 `./9r-deploy.sh --skip-build` 切换，避免部署脚本再次构建；脚本 **exit 0**。
+- **进程及接口验收**：launchd `com.9router.local` 正常，PID `61759`，实际运行 `next-server (v16.4.6)`；`/api/health`、`/api/version`、`/v1/models` 均 HTTP 200；生产 `/v1/models` 返回 627 个当前可见模型；new-api 容器访问 `host.containers.internal:20128/v1/models` PASS；部署脚本近 100 行日志 `malformed=0`。未执行付费 Provider 生成请求。
+- **版本元数据说明**：仓库约定根应用与 CLI 独立版本；本次 upstream tag 为 CLI `0.5.119`，根 `package.json` 仍为 `0.5.116`，未擅自改写。生产 `/api/version` 因当前实现将根应用版本与 npm `9router`（CLI 包）latest 比较，返回 `currentVersion=0.5.116`、`latestVersion=0.5.119`、`hasUpdate=true`；生产 `_meta.appVersion=0.5.116`。这不表示源码未部署，运行进程和 BUILD_ID 已确认切换到新构建。版本检查逻辑的 app/CLI 通道错配留待单独处理。
+- **数据库对账**：部署后生产 DB `journal_mode=delete`、`synchronous=2(FULL)`、`mmap_size=0`、`quick_check=ok`、`integrity_check=ok`；`backupSchemaVersion=3`、`appVersion=0.5.116`、`totalRequestsLifetime=21490`；无 `data.sqlite-wal/-shm`。与升级前 SQLite 在线备份逐表计数完全一致：`apiKeys=3`、`combos=3`、`providerConnections=14`、`usageHistory=19919`、`requestDetails=1000`、`proxyPools=1`、`providerNodes=3`、`usageDaily=41`。未观察到数据丢失、SQLite 损坏或 WAL 回潮。
+- **非阻断日志观察**：新进程启动时远程 modelCatalog 同步有一次 `fetch failed`，本地目录仍可用且 `/v1/models` 正常返回；重启交接期间旧进程 Tailscale 启动日志出现 `/usr/local/bin/tailscaled ENOENT`，Apple Silicon Homebrew 二进制实际位于 `/opt/homebrew/bin/tailscaled`，该 Tailscale 路径问题不属于本次上游改动且未影响 9Router API，未在本次发布中修改。Tailscale Funnel 未作为本次发布验收项。
+- **结论**：upstream v0.5.119 融合源码已在生产正式运行，部署脚本、宿主机 API、new-api 跨容器请求、SQLite 完整性和数据计数对账均 PASS。发布前备份保留用于回滚；本节不表示所有 Provider 端到端请求均已实测。
 
 ### 4.2 高频冲突文件预判
 
@@ -501,7 +513,7 @@ npm run build
 
 **分支名：** `feat/combo-health-fallback`
 
-**当前正式分支源码/线上版本：** 源码已同步至 upstream/master `1855aa44` / tag v0.5.119（根应用 `0.5.116`、CLI `0.5.119` 独立版本）并保留 fork 定制；融合提交 `3220c0d9`（详见 §4.1.12）。**线上仍运行 v0.5.112**，实际上线源码 `58b5b51d`（2026-10-30 部署验收）；v0.5.119 尚未部署，需另行执行生产备份与部署验收。
+**当前正式分支源码/线上版本：** `feat/combo-health-fallback @ 21224f2b`，已同步 upstream/master `1855aa44` / tag v0.5.119 并保留 fork 定制；融合提交 `3220c0d9`。**生产已运行该融合源码**，BUILD_ID `v2yjQC8rvn5__KId2hMYp`、Next.js `16.4.6`、launchd PID `61759`；根应用 package/appVersion `0.5.116`、CLI `0.5.119` 按仓库约定独立版本（详见 §4.1.12–4.1.13）。
 
 **领先 master：** 动态查询：`git rev-list --count master..feat/combo-health-fallback`
 
