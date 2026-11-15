@@ -1053,8 +1053,38 @@ function CapacityAdapterCap({ cap, entry, onChange, activeProviders, getCaps }) 
           No models in pool (will fallback to {DEFAULT_FALLBACK_MODEL})
         </div>
       ) : (
-        <div className="mt-3 overflow-hidden rounded-lg border border-border/50">
-          <table className="w-full text-left text-xs">
+        <div className="mt-3 min-w-0 overflow-hidden rounded-lg border border-border/50">
+          <div className="divide-y divide-border/40 sm:hidden">
+            {models.map((model, index) => (
+              <div key={`mobile-${model}-${index}`} className="flex min-w-0 items-center gap-2 px-2 py-2">
+                <span className="w-7 shrink-0 text-center text-xs text-text-muted">#{index + 1}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="break-all font-mono text-xs text-text-main">{model}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-1">
+                    <CapacityBadges caps={getCaps?.(model)} />
+                    {model === DEFAULT_FALLBACK_MODEL && (
+                      <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">free default</span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button type="button" onClick={() => handleMove(index, -1)} disabled={!enabled || index === 0}
+                    aria-label="Move model up" className="flex size-9 items-center justify-center rounded-lg text-text-muted hover:bg-surface-2 disabled:opacity-30">
+                    <span className="material-symbols-outlined text-[19px]">arrow_upward</span>
+                  </button>
+                  <button type="button" onClick={() => handleMove(index, 1)} disabled={!enabled || index === models.length - 1}
+                    aria-label="Move model down" className="flex size-9 items-center justify-center rounded-lg text-text-muted hover:bg-surface-2 disabled:opacity-30">
+                    <span className="material-symbols-outlined text-[19px]">arrow_downward</span>
+                  </button>
+                  <button type="button" onClick={() => handleRemove(index)} disabled={!enabled}
+                    aria-label="Remove model" className="flex size-9 items-center justify-center rounded-lg text-red-500 hover:bg-red-500/10 disabled:opacity-30">
+                    <span className="material-symbols-outlined text-[19px]">close</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <table className="hidden w-full text-left text-xs sm:table">
             <thead>
               <tr className="border-b border-border/40 bg-black/[0.02] text-text-muted dark:bg-white/[0.02]">
                 <th className="w-12 px-3 py-1.5 font-medium text-center">#</th>

@@ -44,7 +44,7 @@ export default function Modal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
       {/* Overlay */}
       <div
         className="absolute inset-0 bg-black/50 backdrop-blur-[2px] fade-in"
@@ -54,9 +54,9 @@ export default function Modal({
       {/* Modal content */}
       <div
         className={cn(
-          "relative w-full bg-surface",
+          "relative flex max-h-dvh w-full min-w-0 flex-col overflow-hidden bg-surface sm:max-h-[90vh]",
           "border border-border-subtle",
-          "rounded-[14px] shadow-[var(--shadow-elev)]",
+          "rounded-t-2xl shadow-[var(--shadow-elev)] sm:rounded-[14px]",
           "fade-in",
           sizes[size],
           className
@@ -64,7 +64,7 @@ export default function Modal({
       >
         {/* Header */}
         {(title || showTrafficLights) && (
-          <div className="flex items-center justify-between p-2 border-b border-border-subtle">
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border-subtle p-3 sm:p-2">
             <div className="flex items-center">
               {/* Traffic lights — desktop only */}
               {showTrafficLights && (
@@ -99,11 +99,11 @@ export default function Modal({
         )}
 
         {/* Body */}
-        <div className="p-6 max-h-[calc(85vh-100px)] overflow-y-auto custom-scrollbar">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 custom-scrollbar sm:p-6">{children}</div>
 
         {/* Footer */}
         {footer && (
-          <div className="flex items-center justify-end gap-3 p-6 border-t border-border-subtle">
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border-subtle px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:gap-3 sm:p-6">
             {footer}
           </div>
         )}

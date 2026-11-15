@@ -184,6 +184,7 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
   const [displayName, setDisplayName] = useState("");
   const [loginMethod, setLoginMethod] = useState("");
   const [donateOpen, setDonateOpen] = useState(false);
+  const searchVisible = useHeaderSearchStore((state) => state.visible);
 
   // Memoize page info to prevent unnecessary recalculations
   const pageInfo = useMemo(() => getPageInfo(pathname), [pathname]);
@@ -227,13 +228,15 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
   };
 
   return (
-    <header className="shrink-0 flex items-center justify-between gap-3 px-4 lg:px-8 pt-3 pb-2 border-b border-border-subtle bg-surface/60 backdrop-blur-xl lg:bg-transparent lg:backdrop-blur-none z-20">
+    <header className="z-20 flex shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-2 border-b border-border-subtle bg-surface/60 px-3 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur-xl sm:gap-x-3 sm:px-4 lg:bg-transparent lg:px-8 lg:backdrop-blur-none">
       {/* Mobile menu button */}
       <div className="flex items-center gap-3 lg:hidden shrink-0">
         {showMenuButton && (
           <button
+            type="button"
             onClick={onMenuClick}
-            className="text-text-main hover:text-primary transition-colors"
+            aria-label="Open navigation"
+            className="flex size-10 items-center justify-center rounded-lg text-text-main transition-colors hover:bg-surface-2 hover:text-primary"
           >
             <span className="material-symbols-outlined">menu</span>
           </button>
@@ -304,7 +307,7 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
       </div>
 
       {/* Right actions */}
-      <div className="flex items-center gap-1 shrink-0">
+      <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
         {displayName && (loginMethod === "OIDC" || loginMethod === "SAML") && (
           <div
             className="hidden sm:flex items-center max-w-[220px] px-3 py-1.5 rounded-full border border-border bg-surface/70 text-xs text-text-muted truncate"
@@ -317,7 +320,7 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
             </span>
           </div>
         )}
-        <HeaderSearch />
+        <div className="hidden sm:block"><HeaderSearch /></div>
         <button
           onClick={() => setDonateOpen(true)}
           className="hidden sm:flex items-center gap-1.5 px-3 h-8 rounded-lg border border-pink-500/30 bg-pink-500/10 text-pink-600 dark:text-pink-400 hover:bg-pink-500/20 transition-colors text-sm font-medium"
@@ -326,10 +329,16 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
           <span className="material-symbols-outlined text-[18px]">volunteer_activism</span>
           <span className="hidden sm:inline">Donate</span>
         </button>
-        <ThemeToggle />
+        {/* Theme remains available in HeaderMenu on small screens. */}
+        <div className="hidden sm:block"><ThemeToggle /></div>
         <HeaderLanguage />
         <HeaderMenu onLogout={handleLogout} />
       </div>
+      {searchVisible && (
+        <div className="w-full min-w-0 pb-1 sm:hidden">
+          <HeaderSearch />
+        </div>
+      )}
       <DonateModal isOpen={donateOpen} onClose={() => setDonateOpen(false)} />
     </header>
   );
@@ -344,7 +353,7 @@ function HeaderSearch() {
   if (!visible) return null;
 
   return (
-    <div className="relative w-[160px] sm:w-[220px]">
+    <div className="relative w-full min-w-0 sm:w-[220px]">
       <span className="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-text-muted text-[16px] pointer-events-none">
         search
       </span>
@@ -353,7 +362,8 @@ function HeaderSearch() {
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder={placeholder}
-        className="w-full h-8 pl-7 pr-7 rounded-lg border border-border bg-surface/60 text-sm focus:outline-none focus:border-primary/50 transition-colors"
+        aria-label="Search current page"
+        className="w-full h-10 sm:h-8 pl-7 pr-7 rounded-lg border border-border bg-surface/60 text-base sm:text-sm focus:outline-none focus:border-primary/50 transition-colors"
       />
       {query && (
         <button

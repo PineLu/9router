@@ -2,9 +2,17 @@
 
 import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
+import Link from "next/link";
 import { useNotificationStore } from "@/store/notificationStore";
 import Sidebar from "../Sidebar";
 import Header from "../Header";
+
+const MOBILE_NAV = [
+  { href: "/dashboard/endpoint", label: "Endpoint", icon: "api" },
+  { href: "/dashboard/providers", label: "Providers", icon: "dns" },
+  { href: "/dashboard/combos", label: "Combos", icon: "layers" },
+  { href: "/dashboard/usage", label: "Usage", icon: "bar_chart" },
+];
 
 function getToastStyle(type) {
   if (type === "success") {
@@ -37,6 +45,16 @@ export default function DashboardLayout({ children }) {
   const notifications = useNotificationStore((state) => state.notifications);
   const removeNotification = useNotificationStore((state) => state.removeNotification);
 
+  // Escape closes the mobile navigation without affecting desktop shortcuts.
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setSidebarOpen(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [sidebarOpen]);
+
   // Preload heavy usage charts in background when browser is idle
   useEffect(() => {
     const preload = () => {
@@ -56,8 +74,8 @@ export default function DashboardLayout({ children }) {
   }, []);
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-bg">
-      <div className="fixed top-4 right-4 z-[80] flex w-[min(92vw,380px)] flex-col gap-2">
+    <div className="flex h-screen h-dvh w-full min-w-0 overflow-hidden bg-bg">
+      <div className="fixed right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[80] flex w-[min(92vw,380px)] flex-col gap-2 sm:right-4">
         {notifications.map((n) => {
           const style = getToastStyle(n.type);
           return (
@@ -89,7 +107,7 @@ export default function DashboardLayout({ children }) {
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/20 lg:hidden"
+          className="fixed inset-0 z-40 bg-black/40 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
@@ -101,6 +119,11 @@ export default function DashboardLayout({ children }) {
 
       {/* Sidebar - Mobile */}
       <div
+        role="dialog"
+        aria-label="Navigation"
+        aria-modal={sidebarOpen ? "true" : undefined}
+        aria-hidden={!sidebarOpen}
+        inert={!sidebarOpen}
         className={`fixed inset-y-0 left-0 z-50 transform lg:hidden transition-transform duration-300 ease-in-out ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         }`}
@@ -109,13 +132,27 @@ export default function DashboardLayout({ children }) {
       </div>
 
       {/* Main content */}
-      <main className="flex flex-col flex-1 h-full min-w-0 relative transition-colors duration-300 isolate">
+      <main className="relative isolate flex h-full min-h-0 min-w-0 flex-1 flex-col transition-colors duration-300">
         {/* Faint grid background */}
         <div className="landing-grid absolute inset-0 pointer-events-none -z-10" aria-hidden="true" />
         <Header key={pathname} onMenuClick={() => setSidebarOpen(true)} />
-        <div className={`flex-1 overflow-y-auto custom-scrollbar ${pathname === "/dashboard/basic-chat" ? "" : "p-6 lg:p-10"} ${pathname === "/dashboard/basic-chat" ? "flex flex-col overflow-hidden" : ""}`}>
-          <div className={`${pathname === "/dashboard/basic-chat" ? "flex-1 w-full h-full flex flex-col" : pathname === "/dashboard/usage" ? "w-full" : "max-w-7xl mx-auto"}`}>{children}</div>
+        <div className={`min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain custom-scrollbar ${pathname === "/dashboard/basic-chat" ? "" : "px-3 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-6 lg:p-10"} ${pathname === "/dashboard/basic-chat" ? "flex flex-col overflow-hidden" : ""}`}>
+          <div className={`${pathname === "/dashboard/basic-chat" ? "min-h-0 min-w-0 flex-1 w-full h-full flex flex-col" : pathname === "/dashboard/usage" ? "min-w-0 w-full" : "min-w-0 w-full max-w-7xl mx-auto"}`}>{children}</div>
         </div>
+        {pathname !== "/dashboard/basic-chat" && (
+          <nav aria-label="Quick navigation" className="z-10 grid shrink-0 grid-cols-4 border-t border-border-subtle bg-surface/95 px-1 pb-[max(0.3rem,env(safe-area-inset-bottom))] pt-1 backdrop-blur-xl lg:hidden">
+            {MOBILE_NAV.map((item) => {
+              const active = pathname === item.href || (item.href === "/dashboard/endpoint" && pathname === "/dashboard") || pathname.startsWith(item.href + "/");
+              return (
+                <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined}
+                  className={`flex min-h-12 min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg text-[10px] font-medium transition-colors ${active ? "bg-primary/10 text-primary" : "text-text-muted hover:text-text-main"}`}>
+                  <span aria-hidden="true" className="material-symbols-outlined text-[21px]">{item.icon}</span>
+                  <span className="truncate">{item.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+        )}
       </main>
     </div>
   );

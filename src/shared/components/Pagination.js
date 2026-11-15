@@ -81,7 +81,7 @@ export default function Pagination({
               size="sm"
               onClick={() => onPageChange(currentPage - 1)}
               disabled={currentPage === 1}
-              className="w-9 px-0"
+              className="h-10 w-10 px-0 sm:h-7 sm:w-9"
             >
               <span className="material-symbols-outlined text-[18px]">chevron_left</span>
             </Button>
@@ -138,7 +138,7 @@ export default function Pagination({
               size="sm"
               onClick={() => onPageChange(currentPage + 1)}
               disabled={currentPage === totalPages}
-              className="w-9 px-0"
+              className="h-10 w-10 px-0 sm:h-7 sm:w-9"
             >
               <span className="material-symbols-outlined text-[18px]">chevron_right</span>
             </Button>

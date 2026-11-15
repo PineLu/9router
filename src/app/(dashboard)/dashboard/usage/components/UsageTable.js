@@ -159,7 +159,70 @@ export default function UsageTable({
       <div className="p-4 border-b border-border bg-bg-subtle/50">
         <h3 className="font-semibold">{title}</h3>
       </div>
-      <div className="overflow-x-auto">
+      {/* Overview tables become readable, expandable cards below the md breakpoint. */}
+      <div className="space-y-3 p-3 md:hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <label className="flex min-w-0 items-center gap-2 text-xs text-text-muted">
+            Sort by
+            <select
+              value={sortBy}
+              onChange={(event) => onToggleSort(tableType, event.target.value)}
+              className="max-w-[180px] rounded-lg border border-border bg-surface p-2 text-base text-text-main"
+            >
+              {[...columns, ...valueColumns].map((column) => (
+                <option key={column.field} value={column.field}>{column.label}</option>
+              ))}
+            </select>
+          </label>
+          <button type="button" onClick={() => onToggleSort(tableType, sortBy)}
+            className="flex min-h-10 items-center gap-1 rounded-lg border border-border px-3 text-sm text-text-main"
+            aria-label="Toggle sort order">
+            {sortOrder === "asc" ? "↑ Asc" : "↓ Desc"}
+          </button>
+        </div>
+        {groupedData.length === 0 ? (
+          <p className="p-6 text-center text-sm text-text-muted">{emptyMessage}</p>
+        ) : groupedData.map((group) => (
+          <section key={group.groupKey} className="min-w-0 overflow-hidden rounded-xl border border-border-subtle bg-surface-2/30">
+            <button type="button" onClick={() => toggleGroup(group.groupKey)}
+              aria-expanded={expanded.has(group.groupKey)}
+              className="flex min-h-12 w-full items-center justify-between gap-3 px-3 py-2 text-left">
+              <span className="min-w-0 flex-1 break-all text-sm font-semibold text-text-main">{group.groupKey}</span>
+              <span className="shrink-0 text-right font-mono text-sm font-semibold text-primary">
+                {viewMode === "tokens" ? fmt(group.summary.totalTokens) : fmtCost(group.summary.cost)}
+              </span>
+              <span className="material-symbols-outlined text-lg text-text-muted">
+                {expanded.has(group.groupKey) ? "expand_less" : "expand_more"}
+              </span>
+            </button>
+            <div className="grid grid-cols-3 gap-2 border-t border-border-subtle px-3 py-2 text-xs">
+              <div><span className="block text-text-muted">Requests</span><span className="font-medium">{fmt(group.summary.requests)}</span></div>
+              <div><span className="block text-text-muted">Input</span><span className="font-medium">{viewMode === "tokens" ? fmt(group.summary.promptTokens) : fmtCost(group.summary.inputCost)}</span></div>
+              <div><span className="block text-text-muted">Output</span><span className="font-medium">{viewMode === "tokens" ? fmt(group.summary.completionTokens) : fmtCost(group.summary.outputCost)}</span></div>
+            </div>
+            {expanded.has(group.groupKey) && (
+              <div className="space-y-2 border-t border-border-subtle bg-bg-subtle/30 p-2">
+                {group.items.map((item) => (
+                  <div key={item.key} className="min-w-0 rounded-lg border border-border-subtle bg-surface p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="min-w-0 break-all text-xs font-medium text-text-main">{item.rawModel || item.model || item.accountName || item.keyName || item.key}</span>
+                      <span className="shrink-0 font-mono text-xs text-primary">
+                        {viewMode === "tokens" ? fmt(item.totalTokens) : fmtCost(item.cost)}
+                      </span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-muted">
+                      <span>{fmt(item.requests)} requests</span>
+                      <span>Input {viewMode === "tokens" ? fmt(item.promptTokens) : fmtCost(item.inputCost)}</span>
+                      <span>Output {viewMode === "tokens" ? fmt(item.completionTokens) : fmtCost(item.outputCost)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        ))}
+      </div>
+      <div className="hidden overflow-x-auto md:block">
         <table className="w-full text-sm text-left">
           <thead className="bg-bg-subtle/30 text-text-muted uppercase text-xs">
             <tr>

@@ -408,7 +408,7 @@ export default function ProvidersPage() {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="h-8 rounded-lg border border-black/10 bg-black/[0.02] px-2 text-xs text-text-primary outline-none transition-colors hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/10"
+          className="h-11 w-full rounded-lg border border-black/10 bg-black/[0.02] px-3 text-base sm:h-8 sm:w-auto sm:px-2 sm:text-xs text-text-primary outline-none transition-colors hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/10"
           aria-label="Filter providers by connection status"
         >
           {STATUS_FILTER_OPTIONS.map((option) => (
@@ -672,12 +672,12 @@ export default function ProvidersPage() {
       {/* Test Results Modal */}
       {testResults && (
         <div
-          className="fixed inset-0 z-50 flex items-start justify-center px-3 pt-[6vh] sm:pt-[10vh]"
+          className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-start sm:px-3 sm:pt-[10vh]"
           onClick={() => setTestResults(null)}
         >
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
           <div
-            className="relative bg-surface border border-border rounded-xl w-full max-w-[600px] max-h-[86vh] sm:max-h-[80vh] overflow-y-auto shadow-2xl"
+            className="relative w-full max-h-dvh overflow-y-auto rounded-t-2xl border border-border bg-surface shadow-2xl sm:max-h-[80vh] sm:max-w-[600px] sm:rounded-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-3 border-b border-border bg-surface/95 backdrop-blur-sm rounded-t-xl">
@@ -690,7 +690,7 @@ export default function ProvidersPage() {
                 <span className="material-symbols-outlined text-lg">close</span>
               </button>
             </div>
-            <div className="p-5">
+            <div className="p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-5">
               <ProviderTestResultsView results={testResults} />
             </div>
           </div>

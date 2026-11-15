@@ -12,10 +12,10 @@ export default function Drawer({
   className
 }) {
   const widths = {
-    sm: "w-[400px]",
-    md: "w-[500px]",
-    lg: "w-[600px]",
-    xl: "w-[800px]",
+    sm: "w-full sm:w-[400px]",
+    md: "w-full sm:w-[500px]",
+    lg: "w-full sm:w-[600px]",
+    xl: "w-full sm:w-[800px]",
     full: "w-full",
   };
 
@@ -49,7 +49,7 @@ export default function Drawer({
 
       {/* Drawer panel */}
       <div className={cn(
-        "absolute right-0 top-0 h-full bg-surface flex flex-col",
+        "absolute right-0 top-0 flex h-full h-dvh max-w-full min-w-0 flex-col bg-surface",
         "shadow-[var(--shadow-elev)]",
         "slide-in-right",
         "border-l border-border-subtle",
@@ -57,7 +57,7 @@ export default function Drawer({
         className
       )}>
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-border-subtle flex-shrink-0">
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border-subtle p-4 pt-[max(1rem,env(safe-area-inset-top))] sm:p-6">
           <div className="flex items-center gap-3">
             {title && (
               <h2 className="text-lg font-semibold text-text-main">{title}</h2>
@@ -66,14 +66,15 @@ export default function Drawer({
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-[10px] text-text-muted hover:bg-surface-2 hover:text-text-main transition-colors"
+            aria-label="Close details"
+            className="flex size-10 shrink-0 items-center justify-center rounded-[10px] text-text-muted transition-colors hover:bg-surface-2 hover:text-text-main"
           >
             <span className="material-symbols-outlined text-[20px]">close</span>
           </button>
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain p-4 pb-[max(1rem,env(safe-area-inset-bottom))] custom-scrollbar sm:p-6">
           {children}
         </div>
       </div>

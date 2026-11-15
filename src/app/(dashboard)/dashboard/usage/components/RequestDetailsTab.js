@@ -240,7 +240,7 @@ export default function RequestDetailsTab() {
               type="button"
               onClick={() => applyPreset(p.key)}
               className={cn(
-                "h-8 rounded-full border px-4 text-sm transition-colors",
+                "min-h-10 sm:min-h-8 rounded-full border px-4 text-sm transition-colors",
                 activePreset === p.key
                   ? "border-primary bg-primary/10 font-medium text-primary"
                   : "border-black/10 text-text-muted hover:text-text-main dark:border-white/10"
@@ -259,7 +259,7 @@ export default function RequestDetailsTab() {
               onChange={(e) => updateFilters({ provider: e.target.value })}
               className={cn(
                 "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
-                "text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
+                "text-base sm:text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
                 "w-full min-w-0 cursor-pointer"
               )}
               style={{ colorScheme: 'auto' }}
@@ -281,7 +281,7 @@ export default function RequestDetailsTab() {
               onChange={(e) => updateFilters({ combo: e.target.value })}
               className={cn(
                 "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
-                "text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
+                "text-base sm:text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
                 "w-full min-w-0 cursor-pointer"
               )}
               style={{ colorScheme: 'auto' }}
@@ -303,7 +303,7 @@ export default function RequestDetailsTab() {
               onChange={(e) => updateFilters({ status: e.target.value })}
               className={cn(
                 "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
-                "text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
+                "text-base sm:text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20",
                 "w-full min-w-0 cursor-pointer"
               )}
               style={{ colorScheme: 'auto' }}
@@ -326,7 +326,7 @@ export default function RequestDetailsTab() {
               placeholder="e.g. empty response"
               className={cn(
                 "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
-                "w-full min-w-0 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20"
+                "w-full min-w-0 text-base sm:text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20"
               )}
             />
           </div>
@@ -340,7 +340,7 @@ export default function RequestDetailsTab() {
               onChange={(e) => updateFilters({ startDate: e.target.value })}
               className={cn(
                 "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
-                "w-full min-w-0 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20"
+                "w-full min-w-0 text-base sm:text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20"
               )}
             />
           </div>
@@ -354,7 +354,7 @@ export default function RequestDetailsTab() {
               onChange={(e) => updateFilters({ endDate: e.target.value })}
               className={cn(
                 "h-9 px-3 rounded-lg border border-black/10 dark:border-white/10 bg-surface",
-                "w-full min-w-0 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20"
+                "w-full min-w-0 text-base sm:text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20"
               )}
             />
           </div>
@@ -364,7 +364,7 @@ export default function RequestDetailsTab() {
             <Button 
               variant="ghost" 
               onClick={handleClearFilters}
-              disabled={!filters.provider && !filters.status && !filters.error && !filters.startDate && !filters.endDate}
+              disabled={!filters.provider && !filters.combo && !filters.status && !filters.error && !filters.startDate && !filters.endDate}
               className="w-full"
             >
               Clear Filters
@@ -374,7 +374,82 @@ export default function RequestDetailsTab() {
       </Card>
 
       <Card padding="none">
-        <div className="overflow-x-auto">
+        {/* Touch-friendly request cards on phones; the full data table remains on desktop. */}
+        <div className="space-y-2 p-3 md:hidden">
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 p-8 text-sm text-text-muted" role="status">
+              <span className="material-symbols-outlined animate-spin text-[20px]">progress_activity</span>
+              Loading...
+            </div>
+          ) : details.length === 0 ? (
+            <p className="p-8 text-center text-sm text-text-muted">No request details found</p>
+          ) : (
+            details.map((detail, index) => (
+              <article
+                key={`mobile-${detail.id}-${index}`}
+                className="min-w-0 rounded-xl border border-border-subtle bg-surface-2/40 p-3"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <time className="text-xs text-text-muted" dateTime={detail.timestamp}>
+                    {new Date(detail.timestamp).toLocaleString()}
+                  </time>
+                  <span className={cn(
+                    "shrink-0 rounded-full px-2 py-0.5 text-xs font-medium",
+                    detail.status === "success"
+                      ? "bg-green-500/10 text-green-600"
+                      : "bg-red-500/10 text-red-600"
+                  )}>
+                    {detail.status}
+                  </span>
+                </div>
+                <p className="mt-1 break-all font-mono text-sm font-semibold text-text-main">
+                  {detail.model || "—"}
+                </p>
+                <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                  <div className="min-w-0">
+                    <dt className="text-text-muted">Provider</dt>
+                    <dd className="mt-0.5 break-words font-medium text-text-main">
+                      {getProviderName(detail.provider, providerNameCache) || "—"}
+                    </dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-text-muted">Account</dt>
+                    <dd className="mt-0.5 break-all text-text-main">{detail.accountName || "—"}</dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-text-muted">Combo</dt>
+                    <dd className="mt-0.5 break-all font-mono text-text-main">{detail.comboName || "—"}</dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-text-muted">Latency</dt>
+                    <dd className="mt-0.5 font-mono text-text-main">{detail.latency?.total || 0} ms</dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-text-muted">Input / Cached</dt>
+                    <dd className="mt-0.5 font-mono text-text-main">
+                      {getInputTokens(detail.tokens).toLocaleString()} / {getCachedTokens(detail.tokens).toLocaleString()}
+                    </dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-text-muted">Output / Cache creation</dt>
+                    <dd className="mt-0.5 font-mono text-text-main">
+                      {getOutputTokens(detail.tokens).toLocaleString()} / {getCacheCreationTokens(detail.tokens).toLocaleString()}
+                    </dd>
+                  </div>
+                </dl>
+                <div className="mt-3 flex min-w-0 items-center justify-between gap-3 border-t border-border-subtle pt-2">
+                  <p className="min-w-0 flex-1 break-words text-xs text-red-600">
+                    {detail.errorMessage || ""}
+                  </p>
+                  <Button variant="outline" size="sm" onClick={() => handleViewDetail(detail)}>
+                    Detail
+                  </Button>
+                </div>
+              </article>
+            ))
+          )}
+        </div>
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full table-auto">
             <thead>
               <tr className="border-b border-black/5 dark:border-white/5">
