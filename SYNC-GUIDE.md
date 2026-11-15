@@ -413,7 +413,17 @@ cd ~/tujia_workspace/9router
 - **真实浏览器回归**：新增 `tests/smoke/mobile-layout.cjs`，使用本机 headless Google Chrome + `playwright-core`、独立临时 `DATA_DIR`、独立端口 `20129` 和测试登录信息。**320/360/390/430/768/1280px × Endpoint/Providers/Combos/Usage Details/Usage Overview 共 30 组页面全部 PASS**；检查水平滚动溢出、手机导航显示/路由跳转、菜单打开/Esc 关闭、移动端搜索框宽度、请求卡/桌面表切换、全宽 Drawer 以及 API Key 弹窗可见性。临时服务停止并自动清理数据。
 - **工程验收**：Node `v22.22.3` / Next `16.4.6`，独立 `DATA_DIR=/tmp/9router-mobile-build-data-1115` 的 `npm run build` exit 0，最终 BUILD_ID `7pn00nIhnDjqN5u0CDxPf`；11 个定向 Vitest 文件 **107/107 PASS**。ESLint 当前范围与正式源码 baseline 都为 **37 errors / 16 warnings**，按照文件 + ruleId + severity 比对 **新增问题 0**（均为既有诊断），`git diff --check` PASS。
 - **验收限制**：上述是 Chrome 移动视口及桌面视口测试，**尚未在真实 iOS Safari、Android Chrome 真机**上完成交互验收；非核心的其他管理页仍可能需要针对性微调。Browser smoke 测试通过不代表全站所有页面均无移动端问题。
-- **发布边界**：目前只验证源码与隔离构建。**不部署生产、不重启 `com.9router.local`**；正式服务仍运行先前的 BUILD_ID `3OZBXHGfH1VAUj_7Skzqy`。需另行按发布 SOP 备份、构建、部署并验收。
+- **发布边界（本节隔离验收时的历史状态）**：当时仅验证源码与隔离构建，未部署生产。随后正式发布、生产 DB 对账及手机浏览器回归见 §4.1.16。
+
+### 4.1.16 2026-11-15 手机响应式 UI 正式部署与生产复核
+
+- **发布源码**：`feat/combo-health-fallback @ ed2b705fd69bad7edbd96ac2489fbcf8541f5ba7`（UI 代码提交 `69661e86`、验收文档 `ed2b705f`）。发布前源目录 clean，HEAD 与 `origin/feat/combo-health-fallback` 一致；无数据库/代理业务逻辑代码改动。
+- **回滚备份**：`~/.9router-upgrade-backups/pre-mobile-responsive-20261115-195227/`（私有权限 700，约 1.1 GB），保存旧 `.next`（BUILD_ID `3OZBXHGfH1VAUj_7Skzqy`）、生产 SQLite 在线 `.backup`、11 张表计数、必要认证/配置文件、launchd plist、package-lock 和源码 SHA。备份 SQLite `quick_check=ok`、`integrity_check=ok`；必要时先回滚旧构建，数据库快照留作应急恢复，不应无条件覆盖持续写入的生产数据。
+- **独立构建**：`PATH` 选择 Node `v22.22.3` / Next `16.4.6`，正式代码在独立临时 `DATA_DIR=/tmp/9router-mobile-prod-build-20261115-195227` 下执行 `npm run build` exit 0；新 BUILD_ID `4K5h65F6p-00UeTYy_3WD`，root / standalone 均为 app `0.5.116`。未使用 CLI pack，CLI 独立版本 `0.5.119` 不变。
+- **发布**：执行 `./9r-deploy.sh --skip-build`，exit 0，launchd `com.9router.local` 新 PID `78004`。脚本五项检查通过：宿主机 `/v1/models`、new-api 经 `host.containers.internal:20128`、DB journal_mode、运行日志近百行 `malformed=0`、launchd 正常。`/api/health` 返回 `ok:true`；`/api/version` 返回 `currentVersion=0.5.116 / latestVersion=null / hasUpdate=false`；匿名 `/dashboard` HTTP 307、`/login` HTTP 200。
+- **生产 DB 复核**：`journal_mode=delete`、`synchronous=2 (FULL)`、`mmap_size=0`、`quick_check=ok`、`integrity_check=ok`，无 WAL/SHM 文件。与备份逐表计数 **11/11 完全一致**：`_meta=4`、`apiKeys=3`、`combos=3`、`kv=36`、`providerConnections=14`、`providerNodes=3`、`proxyPools=1`、`requestDetails=1000`、`settings=1`、`usageDaily=41`、`usageHistory=19919`。
+- **上线构建手机回归**：使用正式 `.next/standalone` 构建，在**独立端口 20129 和临时 DB（不是生产授权态）**运行 `tests/smoke/mobile-layout.cjs`，6 种视口（320/360/390/430/768/1280）× 5 页面共 **30/30 PASS**；移动导航、路由跳转、请求详情 Drawer 和弹窗均 PASS。线上实际 `/_next/static/chunks/5497-f3c76182ddd38994.js` 包含 `Quick navigation`，经生产 HTTP 200，确认新的手机端 Client JS 已由线上提供。未执行真实付费模型请求。
+- **限制与后续**：这证明生产版本含手机 UI 与同一构建产物的 Chrome 浏览器视口行为，**不等于已在真实 Android 手机 / iOS Safari 上登录交互验收**；Safari 安全区、软键盘、特殊长模型名等可按实际使用反馈继续微调。保留回滚备份直到真机验收稳定。
 
 ### 4.2 高频冲突文件预判
 
@@ -544,7 +554,7 @@ npm run build
 
 **分支名：** `feat/combo-health-fallback`
 
-**当前正式分支源码/线上版本：** feat/combo-health-fallback 已同步 upstream/master 1855aa44 / tag v0.5.119，融合提交 3220c0d9；本轮修复提交 38dddf1b、1a5a8192 已 push。生产已运行新源码，BUILD_ID 3OZBXHGfH1VAUj_7Skzqy、Next.js 16.4.6、launchd PID 38452；根应用 0.5.116、CLI 0.5.119 保持独立版本。版本更新检查按发行形态区分，Tailscale daemon 路径按平台和架构发现。
+**当前正式分支源码/线上版本（2026-11-15）：** `feat/combo-health-fallback` 已同步 upstream/master `1855aa44` / tag `v0.5.119`，并纳入手机 UI（发布代码 SHA `ed2b705f`；发布记录见 §4.1.16）。生产 BUILD_ID `4K5h65F6p-00UeTYy_3WD`，Next.js `16.4.6`、launchd 部署时 PID `78004`；根应用 `0.5.116`、CLI `0.5.119` 保持独立。移动端上线构建浏览器冒烟测试通过，尚待真机体验验收。
 
 **领先 master：** 动态查询：`git rev-list --count master..feat/combo-health-fallback`
 
