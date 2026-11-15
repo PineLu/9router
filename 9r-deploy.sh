@@ -20,6 +20,9 @@ set -uo pipefail
 
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # 仓库根（脚本就在仓库根目录）
 DATA_DIR="$HOME/.9router"
+# Match the Node runtime used by launchd; Homebrew's newer Node must not win PATH.
+PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export PATH
 PLIST_LABEL="com.9router.local"
 LOG="/tmp/9r-deploy-$(date +%Y%m%d-%H%M%S).log"
 DB="$DATA_DIR/db/data.sqlite"
@@ -28,6 +31,7 @@ USER_UID="$(id -u)"
 PODMAN=/opt/homebrew/bin/podman
 
 SKIP_BUILD=0
+BUILD_DATA_DIR=""
 for a in "$@"; do
   case "$a" in
     --skip-build) SKIP_BUILD=1 ;;
@@ -40,10 +44,15 @@ step() { echo; echo "======== $1 ========"; }
 
 cd "$SRC_DIR" || exit 1
 if [ $SKIP_BUILD -eq 0 ]; then
-  step "1/3 构建（npm install + app 构建 + next build，在 ${SRC_DIR}）"
-  npm install --silent 2>&1 | tail -1
-  npm run build >"$LOG" 2>&1 || { echo "❌ 构建失败，日志尾部："; tail -30 "$LOG"; exit 1; }
-  echo "构建完成（日志: ${LOG}）"
+  step "1/3 构建（Node $(node --version) / npm $(npm --version)，临时数据库目录）"
+  BUILD_DATA_DIR=$(mktemp -d /tmp/9router-build.XXXXXX) || { echo "❌ 无法创建临时构建数据目录"; exit 1; }
+  trap 'if [ -n "$BUILD_DATA_DIR" ]; then rm -rf "$BUILD_DATA_DIR"; fi' EXIT
+  npm install --silent >"$LOG" 2>&1 || { echo "❌ npm install 失败，日志尾部："; tail -30 "$LOG"; exit 1; }
+  DATA_DIR="$BUILD_DATA_DIR" npm run build >>"$LOG" 2>&1 || { echo "❌ 构建失败，日志尾部："; tail -30 "$LOG"; exit 1; }
+  rm -rf "$BUILD_DATA_DIR"
+  BUILD_DATA_DIR=""
+  trap - EXIT
+  echo "构建完成（日志: $LOG）"
 else
   step "1/3 检查现有构建版本"
   node - <<'NODE' || exit 1
