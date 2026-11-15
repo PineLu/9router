@@ -213,6 +213,7 @@ function buildCliPackage() {
         LOCALAPPDATA: path.join(buildHomeDir, "AppData", "Local"),
         NEXT_DIST_DIR: buildDistDirName,
         NEXT_TRACING_ROOT_MODE: "workspace",
+        NEXT_PUBLIC_9ROUTER_DISTRIBUTION: "cli",
       }
     });
     console.log("✅ Next.js build completed\n");

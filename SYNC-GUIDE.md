@@ -379,10 +379,23 @@ cd ~/tujia_workspace/9router
 - **私有备份**：`~/.9router-upgrade-backups/pre-v05119-20261115-124204/`（目录权限 `700`，敏感文件 `600`，约 1.2GB）。使用 SQLite 在线 `.backup` 保存生产 `data.sqlite`，并核验备份库 `journal_mode=delete`、`quick_check=ok`、`integrity_check=ok`；保存旧 `.next`（BUILD_ID `HQex9k3MIvAJKs8fmlS-A`）、launchd plist、`jwt-secret`、`machine-id`、`auth/cli-secret`、原始及验证版 package-lock、发布 SHA、发布前 DB metadata 和表计数。禁止公开、上传或提前删除。
 - **构建**：正式源码目录在 `DATA_DIR=/tmp/9router-v05119-prod-build-20261115-124204` 下执行 `npm run build`，exit 0；BUILD_ID `v2yjQC8rvn5__KId2hMYp`，standalone server/custom-server/static/public 资产齐全。随后使用 `./9r-deploy.sh --skip-build` 切换，避免部署脚本再次构建；脚本 **exit 0**。
 - **进程及接口验收**：launchd `com.9router.local` 正常，PID `61759`，实际运行 `next-server (v16.4.6)`；`/api/health`、`/api/version`、`/v1/models` 均 HTTP 200；生产 `/v1/models` 返回 627 个当前可见模型；new-api 容器访问 `host.containers.internal:20128/v1/models` PASS；部署脚本近 100 行日志 `malformed=0`。未执行付费 Provider 生成请求。
-- **版本元数据说明**：仓库约定根应用与 CLI 独立版本；本次 upstream tag 为 CLI `0.5.119`，根 `package.json` 仍为 `0.5.116`，未擅自改写。生产 `/api/version` 因当前实现将根应用版本与 npm `9router`（CLI 包）latest 比较，返回 `currentVersion=0.5.116`、`latestVersion=0.5.119`、`hasUpdate=true`；生产 `_meta.appVersion=0.5.116`。这不表示源码未部署，运行进程和 BUILD_ID 已确认切换到新构建。版本检查逻辑的 app/CLI 通道错配留待单独处理。
+- **版本元数据（部署时状态，后续已在 §4.1.14 修复）**：本次 upstream tag 为 CLI `0.5.119`，根 `package.json` 当时仍为 `0.5.116`。原因是生产部署直接执行 `npm run build`，绕过 `cli/scripts/build-cli.js` 内原有的版本同步步骤；应用 API 却将根应用版本与 npm `9router`（CLI 包）latest 比较，因此返回 `currentVersion=0.5.116`、`latestVersion=0.5.119`、`hasUpdate=true`；生产 `_meta.appVersion=0.5.116`。这不表示源码未部署，运行进程和 BUILD_ID 已确认切换到新构建。后续通过公共 prebuild 同步脚本统一版本。
 - **数据库对账**：部署后生产 DB `journal_mode=delete`、`synchronous=2(FULL)`、`mmap_size=0`、`quick_check=ok`、`integrity_check=ok`；`backupSchemaVersion=3`、`appVersion=0.5.116`、`totalRequestsLifetime=21490`；无 `data.sqlite-wal/-shm`。与升级前 SQLite 在线备份逐表计数完全一致：`apiKeys=3`、`combos=3`、`providerConnections=14`、`usageHistory=19919`、`requestDetails=1000`、`proxyPools=1`、`providerNodes=3`、`usageDaily=41`。未观察到数据丢失、SQLite 损坏或 WAL 回潮。
 - **非阻断日志观察**：新进程启动时远程 modelCatalog 同步有一次 `fetch failed`，本地目录仍可用且 `/v1/models` 正常返回；重启交接期间旧进程 Tailscale 启动日志出现 `/usr/local/bin/tailscaled ENOENT`，Apple Silicon Homebrew 二进制实际位于 `/opt/homebrew/bin/tailscaled`，该 Tailscale 路径问题不属于本次上游改动且未影响 9Router API，未在本次发布中修改。Tailscale Funnel 未作为本次发布验收项。
 - **结论**：upstream v0.5.119 融合源码已在生产正式运行，部署脚本、宿主机 API、new-api 跨容器请求、SQLite 完整性和数据计数对账均 PASS。发布前备份保留用于回滚；本节不表示所有 Provider 端到端请求均已实测。
+
+### 4.1.14 2026-11-15 修复版本更新检查与 Tailscale daemon 路径
+
+- **版本边界**：根应用版本保持 0.5.116，CLI 包版本保持 0.5.119，二者独立。普通源码 npm run build 不改写任一 package version；仅 cli/scripts/build-cli.js 的既有 Step 0 在打包 CLI 时把根应用版本同步为 CLI 版本，保证 CLI 内嵌应用与 CLI 发布版本一致。
+- **更新检查通道**：src/app/api/version/route.js 不再让源码部署拿根应用版本与 npm CLI latest 比较。普通源码构建默认不请求 npm，返回根应用 currentVersion、latestVersion=null、hasUpdate=false；CLI 打包通过 NEXT_PUBLIC_9ROUTER_DISTRIBUTION=cli 明确启用 npm latest 检查。这样保留 CLI 的升级提示，同时消除源码部署的跨产品版本误报。
+- **跳过构建保护**：9r-deploy.sh --skip-build 在重启 launchd 前只检查根应用与 .next/standalone/package.json 版本一致，不要求 CLI package version 相同；缺少构建产物或版本不匹配时立即退出，不触碰线上进程。
+- **Tailscale CLI 发现**：新增 `src/lib/tunnel/tailscale/binaryPaths.js`，统一按平台、架构、内置目录、CLI 同目录和 PATH 生成候选路径，并以可执行权限校验。Apple Silicon 优先 `/opt/homebrew/bin`，Intel Mac 优先 `/usr/local/bin`；Linux 覆盖常见系统目录与 PATH；Windows 原有安装路径保持兼容。
+- **daemon 成对发现**：`getTailscaledBin()` 优先选择与当前 CLI 同目录的 `tailscaled`，再搜索内置目录、架构优先系统目录和 PATH。移除 macOS 固定 `/usr/local/bin/tailscaled`。启动 daemon 时监听 ChildProcess `error`，将 `ENOENT` 等启动失败转为可诊断错误；保留原有自定义 socket、stateDir、TUN/userspace 模式及认证状态。
+- **提交**：Tailscale 修复 38dddf1b；版本通道修正与文档更新在本轮纠正提交中记录。发布前会检查完整提交范围。
+- **测试**：新增版本更新通道测试 4 项、Tailscale 二进制候选路径测试 5 项、当前 Apple Silicon 主机解析集成测试 1 项；共 **10/10 PASS**。修改文件 ESLint PASS、Node 语法检查 PASS、bash -n 9r-deploy.sh PASS、git diff --check PASS。
+- **隔离构建及运行**：在独立 worktree /tmp/9router-v05119-fix-validation 构建，未覆盖生产 .next；Node v22.22.3、Next.js 16.4.6，源码构建保持根应用 0.5.116、CLI 0.5.119，npm run build exit 0，standalone package version 0.5.116。隔离服务 /api/version 返回 currentVersion=0.5.116、latestVersion=null、hasUpdate=false；/api/health HTTP 200，/dashboard 未登录预期 307。CLI distribution 的 npm 检查由显式构建标记启用。
+- **本机 Tailscale 解析**：当前 Mac `arm64` 实际解析到 `/opt/homebrew/bin/tailscale` 与 `/opt/homebrew/bin/tailscaled`，二者均为 ARM64，版本 `1.104.7`。只做路径发现和 `tailscaled --version` 验证；未重启 daemon、未重置 socket/stateDir、未触碰 Tailscale 登录/Funnel 状态。
+- **生产状态**：本节仅完成源码修改、测试和隔离构建，**尚未部署**。生产仍运行 §4.1.13 的 BUILD_ID `v2yjQC8rvn5__KId2hMYp`、根应用版本 `0.5.116`；线上版本 API 和 Tailscale 行为在下一次正式部署后才会采用本节修复。部署时须使用完整构建流程 `./9r-deploy.sh`，不可用 `--skip-build` 绕过版本/构建检查。
 
 ### 4.2 高频冲突文件预判
 
@@ -513,7 +526,7 @@ npm run build
 
 **分支名：** `feat/combo-health-fallback`
 
-**当前正式分支源码/线上版本：** `feat/combo-health-fallback @ 21224f2b`，已同步 upstream/master `1855aa44` / tag v0.5.119 并保留 fork 定制；融合提交 `3220c0d9`。**生产已运行该融合源码**，BUILD_ID `v2yjQC8rvn5__KId2hMYp`、Next.js `16.4.6`、launchd PID `61759`；根应用 package/appVersion `0.5.116`、CLI `0.5.119` 按仓库约定独立版本（详见 §4.1.12–4.1.13）。
+**当前正式分支源码/线上版本：** feat/combo-health-fallback 已同步 upstream/master 1855aa44 / tag v0.5.119，融合提交 3220c0d9。源码修复保留根应用 0.5.116 与 CLI 0.5.119 独立版本，按发行形态区分 npm 更新检查，并加入 Tailscale 架构化二进制发现（详见 §4.1.14）；**生产尚未部署这轮修复**，仍运行 BUILD_ID v2yjQC8rvn5__KId2hMYp、Next.js 16.4.6、launchd PID 61759、应用版本 0.5.116。
 
 **领先 master：** 动态查询：`git rev-list --count master..feat/combo-health-fallback`
 

@@ -1,5 +1,6 @@
 import https from "https";
 import pkg from "../../../../package.json" with { type: "json" };
+import { getVersionUpdateInfo, isCliDistribution } from "@/lib/version/updateCheck.js";
 
 const NPM_PACKAGE_NAME = "9router";
 const VERSION_CACHE_TTL_MS = 3600000; // cache npm latest lookup for 1h
@@ -30,16 +31,6 @@ function fetchLatestVersion() {
   });
 }
 
-function compareVersions(a, b) {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
-  for (let i = 0; i < 3; i++) {
-    if (pa[i] > pb[i]) return 1;
-    if (pa[i] < pb[i]) return -1;
-  }
-  return 0;
-}
-
 async function getLatestVersionCached() {
   if (versionCache.value && Date.now() - versionCache.fetchedAt < VERSION_CACHE_TTL_MS) {
     return versionCache.value;
@@ -53,9 +44,12 @@ async function getLatestVersionCached() {
 }
 
 export async function GET() {
-  const latestVersion = await getLatestVersionCached();
-  const currentVersion = pkg.version;
-  const hasUpdate = latestVersion ? compareVersions(latestVersion, currentVersion) > 0 : false;
+  const distribution = process.env.NEXT_PUBLIC_9ROUTER_DISTRIBUTION;
+  const latestVersion = isCliDistribution(distribution) ? await getLatestVersionCached() : null;
 
-  return Response.json({ currentVersion, latestVersion, hasUpdate });
+  return Response.json(getVersionUpdateInfo({
+    currentVersion: pkg.version,
+    latestVersion,
+    distribution,
+  }));
 }

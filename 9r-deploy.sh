@@ -38,12 +38,25 @@ done
 
 step() { echo; echo "======== $1 ========"; }
 
+cd "$SRC_DIR" || exit 1
 if [ $SKIP_BUILD -eq 0 ]; then
-  step "1/3 构建（npm install + next build，在 ${SRC_DIR}）"
-  cd "$SRC_DIR" || exit 1
+  step "1/3 构建（npm install + app 构建 + next build，在 ${SRC_DIR}）"
   npm install --silent 2>&1 | tail -1
-  npm run build >"$LOG" 2>&1 || { echo "❌ 构建失败，日志尾部："; tail -20 "$LOG"; exit 1; }
+  npm run build >"$LOG" 2>&1 || { echo "❌ 构建失败，日志尾部："; tail -30 "$LOG"; exit 1; }
   echo "构建完成（日志: ${LOG}）"
+else
+  step "1/3 检查现有构建版本"
+  node - <<'NODE' || exit 1
+const fs = require("node:fs");
+const appVersion = require("./package.json").version;
+const buildPackagePath = ".next/standalone/package.json";
+if (!fs.existsSync(buildPackagePath)) throw new Error(`Missing ${buildPackagePath}; run without --skip-build`);
+const buildVersion = JSON.parse(fs.readFileSync(buildPackagePath, "utf8")).version;
+if (buildVersion !== appVersion) {
+  throw new Error(`Stale app build: root=${appVersion}, built=${buildVersion}; run without --skip-build`);
+}
+console.log(`App build version verified: ${buildVersion}`);
+NODE
 fi
 
 step "2/3 launchd 重启（服务中断几秒）"
