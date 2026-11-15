@@ -6,6 +6,7 @@ import { execSync, exec, spawn } from "child_process";
 import { promisify } from "util";
 import { execWithPassword } from "@/mitm/dns/dnsConfig";
 import { DATA_DIR } from "@/lib/dataDir.js";
+import { findExecutable, getBinaryCandidates } from "./binaryPaths.js";
 
 const execAsync = promisify(exec);
 
@@ -13,7 +14,7 @@ const BIN_DIR = path.join(DATA_DIR, "bin");
 const IS_MAC = os.platform() === "darwin";
 const IS_LINUX = os.platform() === "linux";
 const IS_WINDOWS = os.platform() === "win32";
-const TAILSCALE_BIN = path.join(BIN_DIR, IS_WINDOWS ? "tailscale.exe" : "tailscale");
+const WINDOWS_TAILSCALE_BIN = "C:\\Program Files\\Tailscale\\tailscale.exe";
 
 // Custom socket for userspace-networking mode (no root required)
 const TAILSCALE_DIR = path.join(DATA_DIR, "tailscale");
@@ -24,18 +25,6 @@ const SOCKET_FLAG = IS_WINDOWS ? [] : ["--socket", TAILSCALE_SOCKET];
 const SYSTEM_TAILSCALE_SOCKET = IS_WINDOWS ? null : "/var/run/tailscale/tailscaled.sock";
 const SYSTEM_SOCKET_FLAG = SYSTEM_TAILSCALE_SOCKET ? ["--socket", SYSTEM_TAILSCALE_SOCKET] : [];
 
-// Well-known Windows install path
-const WINDOWS_TAILSCALE_BIN = "C:\\Program Files\\Tailscale\\tailscale.exe";
-
-// Common Unix install paths to probe synchronously (system tailscale)
-const UNIX_TAILSCALE_CANDIDATES = [
-  "/usr/local/bin/tailscale",
-  "/opt/homebrew/bin/tailscale",
-  "/usr/sbin/tailscale",   // apt package on Debian/Ubuntu
-  "/usr/bin/tailscale",
-  "/snap/bin/tailscale",   // Snap package
-];
-
 // ─── Cache + background refresh (avoid blocking event loop on dead daemon) ──
 const PROBE_TTL_MS = 10000;
 const PROBE_TIMEOUT_MS = 1500;
@@ -45,11 +34,24 @@ const runningCache = { value: false, fetchedAt: 0, refreshing: false };
 const loggedInCache = { value: false, fetchedAt: 0, refreshing: false };
 const funnelUrlCache = { value: null, port: null, fetchedAt: 0, refreshing: false };
 
+function resolveTailscaleBinary(binaryName, cliBin) {
+  const candidates = getBinaryCandidates({
+    binaryName,
+    platform: os.platform(),
+    arch: process.arch,
+    dataBinDir: BIN_DIR,
+    cliBin,
+    pathValue: EXTENDED_PATH,
+  });
+  return findExecutable(candidates, fs);
+}
+
 function fallbackBin() {
-  if (fs.existsSync(TAILSCALE_BIN)) return TAILSCALE_BIN;
-  if (IS_WINDOWS && fs.existsSync(WINDOWS_TAILSCALE_BIN)) return WINDOWS_TAILSCALE_BIN;
-  if (!IS_WINDOWS) return UNIX_TAILSCALE_CANDIDATES.find((p) => fs.existsSync(p)) || null;
-  return null;
+  return resolveTailscaleBinary(IS_WINDOWS ? "tailscale.exe" : "tailscale");
+}
+
+export function getTailscaledBin() {
+  return IS_WINDOWS ? null : resolveTailscaleBinary("tailscaled", getTailscaleBin());
 }
 
 function bgRefreshBin() {
@@ -58,8 +60,8 @@ function bgRefreshBin() {
   const cmd = IS_WINDOWS ? "where tailscale 2>nul" : "which tailscale 2>/dev/null";
   execAsync(cmd, { windowsHide: true, timeout: PROBE_TIMEOUT_MS, env: { ...process.env, PATH: EXTENDED_PATH } })
     .then(({ stdout }) => {
-      const sys = stdout.trim();
-      binCache.value = sys || fallbackBin();
+      const sys = stdout.trim().split(/\r?\n/, 1)[0];
+      binCache.value = (sys && findExecutable([sys], fs)) || fallbackBin();
     })
     .catch(() => { binCache.value = fallbackBin(); })
     .finally(() => {
@@ -72,14 +74,7 @@ function bgRefreshBin() {
 export function getTailscaleBin() {
   if (Date.now() - binCache.fetchedAt > PROBE_TTL_MS) bgRefreshBin();
   // First call: synchronously probe common install paths (no exec, no event-loop block)
-  if (binCache.value === undefined) {
-    if (fs.existsSync(TAILSCALE_BIN)) binCache.value = TAILSCALE_BIN;
-    else if (IS_WINDOWS && fs.existsSync(WINDOWS_TAILSCALE_BIN)) binCache.value = WINDOWS_TAILSCALE_BIN;
-    else if (!IS_WINDOWS) {
-      const found = UNIX_TAILSCALE_CANDIDATES.find((p) => fs.existsSync(p));
-      binCache.value = found || null;
-    } else binCache.value = null;
-  }
+  if (binCache.value === undefined) binCache.value = fallbackBin();
   return binCache.value;
 }
 
@@ -285,7 +280,14 @@ export async function installTailscale(sudoPassword, hostname, onProgress) {
   return startLogin(hostname);
 }
 
-const EXTENDED_PATH = `/usr/local/bin:/opt/homebrew/bin:/usr/sbin:/usr/bin:/bin:/snap/bin:${process.env.PATH || ""}`;
+const MAC_BIN_PATH = process.arch === "arm64"
+  ? "/opt/homebrew/bin:/usr/local/bin"
+  : "/usr/local/bin:/opt/homebrew/bin";
+const EXTENDED_PATH = IS_MAC
+  ? `${MAC_BIN_PATH}:/opt/homebrew/sbin:/usr/local/sbin:/usr/sbin:/usr/bin:/bin:${process.env.PATH || ""}`
+  : IS_LINUX
+    ? `/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/bin:/snap/bin:${process.env.PATH || ""}`
+    : (process.env.PATH || "");
 
 function hasBrew() {
   try { execSync("which brew", { stdio: "ignore", windowsHide: true, env: { ...process.env, PATH: EXTENDED_PATH } }); return true; } catch { return false; }
@@ -571,6 +573,13 @@ export async function startDaemonWithPassword(sudoPassword) {
     } catch { /* unresponsive, restart below */ }
   }
 
+  // Resolve the replacement before stopping an existing daemon; a missing binary
+  // must not take down a daemon that is still serving the current mode.
+  const tailscaledBin = getTailscaledBin();
+  if (!tailscaledBin) {
+    throw new Error(`Tailscale daemon binary not found. Checked Homebrew, system, bundled, and PATH locations (${process.arch}).`);
+  }
+
   // Mode mismatch or unresponsive → kill all daemons on our socket
   try { execSync(`pkill -9 -f "tailscaled.*${TAILSCALE_SOCKET}"`, { stdio: "ignore", timeout: 3000 }); } catch { /* ignore */ }
   if (sudoPassword) {
@@ -583,33 +592,34 @@ export async function startDaemonWithPassword(sudoPassword) {
   // Reclaim folder ownership (previous root daemon may have locked it)
   await ensureUserOwnedDir(TAILSCALE_DIR);
 
-  const tailscaledBin = IS_MAC ? "/usr/local/bin/tailscaled" : "tailscaled";
   const daemonArgs = [
     `--socket=${TAILSCALE_SOCKET}`,
     `--statedir=${TAILSCALE_DIR}`,
   ];
   if (!wantTun) daemonArgs.push("--tun=userspace-networking");
 
-  if (wantTun) {
-    // TUN mode: spawn via sudo, password via stdin. Detached so it survives parent exit.
-    const child = spawn("sudo", ["-S", tailscaledBin, ...daemonArgs], {
+  // Detached daemon survives the request process. Listen for spawn errors so a
+  // stale hard-coded path cannot become an uncaught ENOENT exception.
+  await new Promise((resolve, reject) => {
+    const command = wantTun ? "sudo" : tailscaledBin;
+    const args = wantTun ? ["-S", tailscaledBin, ...daemonArgs] : daemonArgs;
+    const child = spawn(command, args, {
       detached: true,
-      stdio: ["pipe", "ignore", "ignore"],
+      stdio: wantTun ? ["pipe", "ignore", "ignore"] : "ignore",
       cwd: os.tmpdir(),
       env: { ...process.env, PATH: EXTENDED_PATH },
     });
-    child.stdin.write(`${sudoPassword}\n`);
-    child.stdin.end();
-    child.unref();
-  } else {
-    const child = spawn(tailscaledBin, daemonArgs, {
-      detached: true,
-      stdio: "ignore",
-      cwd: os.tmpdir(),
-      env: { ...process.env, PATH: EXTENDED_PATH },
+    child.once("error", (error) => reject(new Error(`Failed to spawn Tailscale daemon (${tailscaledBin}): ${error.message}`)));
+    child.once("spawn", () => {
+      if (wantTun) {
+        child.stdin.on("error", () => {});
+        child.stdin.end(`${sudoPassword}\n`);
+      }
+      child.unref();
+      console.log(`[Tailscale] Starting daemon: ${tailscaledBin}`);
+      resolve();
     });
-    child.unref();
-  }
+  });
 
   // Wait for socket ready
   await new Promise((r) => setTimeout(r, 3000));
