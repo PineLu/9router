@@ -1,3 +1,8 @@
+# Unreleased
+
+## Fixes
+- **Mobile UI**: size the dashboard shell to the actual visual viewport so Android browser chrome and the on-screen keyboard do not cover the bottom navigation; increase API-key and provider-topology control touch targets to 44px.
+
 # v0.5.119 (2026-11-11)
 
 ## Features

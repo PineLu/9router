@@ -1032,8 +1032,10 @@ export default function APIPageClient({ machineId }) {
                     </code>
                     <div className="flex items-center gap-1 shrink-0">
                       <button
+                        type="button"
                         onClick={() => toggleKeyVisibility(key.id)}
-                        className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-all"
+                        aria-label={visibleKeys.has(key.id) ? "Hide API key" : "Show API key"}
+                        className="inline-flex h-11 w-11 items-center justify-center rounded text-text-muted hover:bg-black/5 hover:text-primary transition-all dark:hover:bg-white/5"
                         title={visibleKeys.has(key.id) ? "Hide key" : "Show key"}
                       >
                         <span className="material-symbols-outlined text-[14px]">
@@ -1041,8 +1043,10 @@ export default function APIPageClient({ machineId }) {
                         </span>
                       </button>
                       <button
+                        type="button"
                         onClick={() => copy(key.key, key.id)}
-                        className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-all"
+                        aria-label="Copy API key"
+                        className="inline-flex h-11 w-11 items-center justify-center rounded text-text-muted hover:bg-black/5 hover:text-primary transition-all dark:hover:bg-white/5"
                       >
                         <span className="material-symbols-outlined text-[14px]">
                           {copied === key.id ? "check" : "content_copy"}

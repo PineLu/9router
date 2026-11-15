@@ -9,7 +9,8 @@ const os = require("node:os");
 const path = require("node:path");
 
 const root = path.resolve(__dirname, "../..");
-const serverDir = path.join(root, ".next", "standalone");
+const distDir = process.env.NEXT_DIST_DIR || ".next";
+const serverDir = path.join(root, distDir, "standalone");
 const baseUrl = "http://127.0.0.1:20129";
 const privateDir = fs.mkdtempSync(path.join(os.tmpdir(), "9router-mobile-ui-"));
 const password = "smoke-fixture-password";
@@ -47,6 +48,7 @@ async function main() {
     env: {
       ...process.env,
       DATA_DIR: privateDir,
+      HOME: privateDir,
       PORT: "20129",
       HOSTNAME: "127.0.0.1",
       INITIAL_PASSWORD: password,
@@ -109,6 +111,14 @@ async function main() {
           documentWidth: document.documentElement.scrollWidth,
           contentWidth: document.querySelector("main")?.clientWidth || 0,
           bodyWidth: document.body.scrollWidth,
+          viewportHeight: window.visualViewport?.height || window.innerHeight,
+          rootHeight: document.querySelector("main")?.parentElement?.getBoundingClientRect().height || 0,
+          bottomNavigation: (() => {
+            const nav = document.querySelector('nav[aria-label="Quick navigation"]');
+            if (!nav) return null;
+            const bounds = nav.getBoundingClientRect();
+            return { top: bounds.top, bottom: bounds.bottom, width: bounds.width, height: bounds.height };
+          })(),
         }));
         assert(geometry.documentWidth <= width + 2,
           "Horizontal viewport overflow at " + width + "px " + route + ": " + JSON.stringify(geometry));
@@ -116,6 +126,28 @@ async function main() {
         const mobileNavigation = page.getByRole("navigation", { name: "Quick navigation" });
         assert(await mobileNavigation.isVisible() === (width < 1024),
           "Quick navigation breakpoint mismatch at " + width + "px " + route);
+        if (width < 1024) {
+          assert(Math.abs(geometry.rootHeight - geometry.viewportHeight) <= 2,
+            "App shell does not match the visible viewport at " + width + "px " + route + ": " + JSON.stringify(geometry));
+          assert(geometry.bottomNavigation && geometry.bottomNavigation.bottom <= geometry.viewportHeight + 2,
+            "Bottom navigation is outside the visible viewport at " + width + "px " + route + ": " + JSON.stringify(geometry));
+        }
+        if (route === "/dashboard/endpoint" && width < 768) {
+          const keyButtons = page.locator('button[aria-label="Show API key"], button[aria-label="Hide API key"], button[aria-label="Copy API key"]');
+          for (let i = 0; i < await keyButtons.count(); i += 1) {
+            const bounds = await keyButtons.nth(i).boundingBox();
+            assert(bounds && bounds.width >= 44 && bounds.height >= 44,
+              "API key action target is smaller than 44px at " + width + "px: " + JSON.stringify(bounds));
+          }
+        }
+        if (route.includes("tab=overview") && width < 1024) {
+          const controls = page.locator(".react-flow-controls-custom button");
+          for (let i = 0; i < await controls.count(); i += 1) {
+            const bounds = await controls.nth(i).boundingBox();
+            assert(bounds && bounds.width >= 44 && bounds.height >= 44,
+              "Topology control target is smaller than 44px at " + width + "px: " + JSON.stringify(bounds));
+          }
+        }
         if (route === "/dashboard/providers" && width < 768) {
           const mobileSearch = page.locator("header input:visible").first();
           await mobileSearch.waitFor();

@@ -10,6 +10,7 @@ export default function Toggle({
   disabled = false,
   size = "md",
   className,
+  title,
 }) {
   const sizes = {
     sm: { track: "w-8 h-4", thumb: "size-3", translate: "translate-x-4" },
@@ -33,26 +34,31 @@ export default function Toggle({
         type="button"
         role="switch"
         aria-checked={checked}
+        aria-label={label || title}
+        title={title}
         disabled={disabled}
         onClick={handleClick}
         className={cn(
-          "relative inline-flex shrink-0 cursor-pointer rounded-full",
-          "transition-colors duration-200 ease-in-out",
+          "relative inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full",
           "focus:outline-none focus:ring-2 focus:ring-brand-500/30",
-          checked ? "bg-brand-500" : "bg-surface-3",
-          sizes[size].track,
           disabled && "cursor-not-allowed"
         )}
       >
-        <span
-          className={cn(
-            "pointer-events-none inline-block rounded-full bg-white shadow-sm",
-            "transform transition duration-200 ease-in-out",
-            checked ? sizes[size].translate : "translate-x-0.5",
-            sizes[size].thumb,
-            "mt-0.5"
-          )}
-        />
+        <span className={cn(
+          "relative inline-flex shrink-0 rounded-full transition-colors duration-200 ease-in-out",
+          checked ? "bg-brand-500" : "bg-surface-3",
+          sizes[size].track
+        )}>
+          <span
+            className={cn(
+              "pointer-events-none inline-block rounded-full bg-white shadow-sm",
+              "transform transition duration-200 ease-in-out",
+              checked ? sizes[size].translate : "translate-x-0.5",
+              sizes[size].thumb,
+              "mt-0.5"
+            )}
+          />
+        </span>
       </button>
       {(label || description) && (
         <div className="flex flex-col">

@@ -55,6 +55,28 @@ export default function DashboardLayout({ children }) {
     return () => document.removeEventListener("keydown", closeOnEscape);
   }, [sidebarOpen]);
 
+  // Keep the app shell inside the visible viewport, including when Android's
+  // on-screen keyboard opens. CSS 100vh can include the area behind browser UI.
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+
+    const updateViewportHeight = () => {
+      const height = viewport.scale === 1 ? viewport.height : window.innerHeight;
+      document.documentElement.style.setProperty("--app-viewport-height", `${height}px`);
+    };
+
+    updateViewportHeight();
+    viewport.addEventListener("resize", updateViewportHeight);
+    window.addEventListener("resize", updateViewportHeight);
+
+    return () => {
+      viewport.removeEventListener("resize", updateViewportHeight);
+      window.removeEventListener("resize", updateViewportHeight);
+      document.documentElement.style.removeProperty("--app-viewport-height");
+    };
+  }, []);
+
   // Preload heavy usage charts in background when browser is idle
   useEffect(() => {
     const preload = () => {
@@ -74,7 +96,7 @@ export default function DashboardLayout({ children }) {
   }, []);
 
   return (
-    <div className="flex h-screen h-dvh w-full min-w-0 overflow-hidden bg-bg">
+    <div className="flex w-full min-w-0 overflow-hidden bg-bg" style={{ height: "var(--app-viewport-height, 100vh)" }}>
       <div className="fixed right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[80] flex w-[min(92vw,380px)] flex-col gap-2 sm:right-4">
         {notifications.map((n) => {
           const style = getToastStyle(n.type);
