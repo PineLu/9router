@@ -391,11 +391,16 @@ cd ~/tujia_workspace/9router
 - **跳过构建保护**：9r-deploy.sh --skip-build 在重启 launchd 前只检查根应用与 .next/standalone/package.json 版本一致，不要求 CLI package version 相同；缺少构建产物或版本不匹配时立即退出，不触碰线上进程。
 - **Tailscale CLI 发现**：新增 `src/lib/tunnel/tailscale/binaryPaths.js`，统一按平台、架构、内置目录、CLI 同目录和 PATH 生成候选路径，并以可执行权限校验。Apple Silicon 优先 `/opt/homebrew/bin`，Intel Mac 优先 `/usr/local/bin`；Linux 覆盖常见系统目录与 PATH；Windows 原有安装路径保持兼容。
 - **daemon 成对发现**：`getTailscaledBin()` 优先选择与当前 CLI 同目录的 `tailscaled`，再搜索内置目录、架构优先系统目录和 PATH。移除 macOS 固定 `/usr/local/bin/tailscaled`。启动 daemon 时监听 ChildProcess `error`，将 `ENOENT` 等启动失败转为可诊断错误；保留原有自定义 socket、stateDir、TUN/userspace 模式及认证状态。
-- **提交**：Tailscale 修复 38dddf1b；版本通道修正与文档更新在本轮纠正提交中记录。发布前会检查完整提交范围。
+- **提交**：Tailscale 修复 38dddf1b；版本通道修复 1a5a8192。两个提交均已 push 到 origin/feat/combo-health-fallback。
 - **测试**：新增版本更新通道测试 4 项、Tailscale 二进制候选路径测试 5 项、当前 Apple Silicon 主机解析集成测试 1 项；共 **10/10 PASS**。修改文件 ESLint PASS、Node 语法检查 PASS、bash -n 9r-deploy.sh PASS、git diff --check PASS。
 - **隔离构建及运行**：在独立 worktree /tmp/9router-v05119-fix-validation 构建，未覆盖生产 .next；Node v22.22.3、Next.js 16.4.6，源码构建保持根应用 0.5.116、CLI 0.5.119，npm run build exit 0，standalone package version 0.5.116。隔离服务 /api/version 返回 currentVersion=0.5.116、latestVersion=null、hasUpdate=false；/api/health HTTP 200，/dashboard 未登录预期 307。CLI distribution 的 npm 检查由显式构建标记启用。
 - **本机 Tailscale 解析**：当前 Mac `arm64` 实际解析到 `/opt/homebrew/bin/tailscale` 与 `/opt/homebrew/bin/tailscaled`，二者均为 ARM64，版本 `1.104.7`。只做路径发现和 `tailscaled --version` 验证；未重启 daemon、未重置 socket/stateDir、未触碰 Tailscale 登录/Funnel 状态。
-- **生产状态**：本节仅完成源码修改、测试和隔离构建，**尚未部署**。生产仍运行 §4.1.13 的 BUILD_ID `v2yjQC8rvn5__KId2hMYp`、根应用版本 `0.5.116`；线上版本 API 和 Tailscale 行为在下一次正式部署后才会采用本节修复。部署时须使用完整构建流程 `./9r-deploy.sh`，不可用 `--skip-build` 绕过版本/构建检查。
+- **正式部署**：2026-11-15 13:31 使用完整流程 DATA_DIR=/tmp/9router-source-fix-build-20261115-133120 ./9r-deploy.sh，构建与部署脚本 exit 0；没有使用 --skip-build。新 BUILD_ID 为 3OZBXHGfH1VAUj_7Skzqy，根应用及 standalone package version 均为 0.5.116，CLI package 仍为 0.5.119。launchd PID 从 61759 更新为 38452。
+- **发布前回滚备份**：私有目录 ~/.9router-upgrade-backups/pre-version-tailscale-fix-20261115-133120/，权限 700，约 1.3GB。包含生产 SQLite 在线一致性备份、旧 .next（BUILD_ID v2yjQC8rvn5__KId2hMYp）、launchd plist、package-lock、版本元数据、表计数、必要凭据及 Tailscale 状态目录副本；备份 SQLite quick_check/integrity_check 均为 ok。
+- **生产接口验收**：/api/health 返回 ok；/api/version 返回 currentVersion=0.5.116、latestVersion=null、hasUpdate=false；/v1/models HTTP 200，627 models；new-api 容器经 host.containers.internal:20128 访问 PASS。部署脚本的五项检查全部通过，近 100 行日志 malformed=0。
+- **生产数据库对账**：journal_mode=delete、synchronous=2(FULL)、mmap_size=0、quick_check=ok、integrity_check=ok，无 data.sqlite-wal/-shm。与发布前 SQLite 备份逐表计数完全一致：_meta=4、apiKeys=3、combos=3、kv=36、providerConnections=14、providerNodes=3、proxyPools=1、requestDetails=1000、settings=1、usageDaily=41、usageHistory=19919。
+- **Tailscale 验收边界**：Apple Silicon 实机解析器定位到 /opt/homebrew/bin/tailscale 与 /opt/homebrew/bin/tailscaled（1.104.7）；使用独立 /tmp stateDir 启动 userspace daemon，成功创建 socket，CLI status 返回 NeedsLogin。测试进程已停止并清理临时目录；没有执行 tailscale up，没有改动生产 Tailscale state、登录或 Funnel。部署后日志没有新增 /usr/local/bin/tailscaled ENOENT；生产当前未运行独立 tailscaled 进程，登录状态仍为未登录，未把它误报为登录成功。
+- **结论**：版本更新检查、宿主机 API、跨容器请求、数据库完整性/数据对账和 Tailscale 二进制发现均通过；新源码已正式部署。未执行付费 Provider 生成请求，也未改变 Tailscale 登录状态。
 
 ### 4.2 高频冲突文件预判
 
@@ -526,7 +531,7 @@ npm run build
 
 **分支名：** `feat/combo-health-fallback`
 
-**当前正式分支源码/线上版本：** feat/combo-health-fallback 已同步 upstream/master 1855aa44 / tag v0.5.119，融合提交 3220c0d9。源码修复保留根应用 0.5.116 与 CLI 0.5.119 独立版本，按发行形态区分 npm 更新检查，并加入 Tailscale 架构化二进制发现（详见 §4.1.14）；**生产尚未部署这轮修复**，仍运行 BUILD_ID v2yjQC8rvn5__KId2hMYp、Next.js 16.4.6、launchd PID 61759、应用版本 0.5.116。
+**当前正式分支源码/线上版本：** feat/combo-health-fallback 已同步 upstream/master 1855aa44 / tag v0.5.119，融合提交 3220c0d9；本轮修复提交 38dddf1b、1a5a8192 已 push。生产已运行新源码，BUILD_ID 3OZBXHGfH1VAUj_7Skzqy、Next.js 16.4.6、launchd PID 38452；根应用 0.5.116、CLI 0.5.119 保持独立版本。版本更新检查按发行形态区分，Tailscale daemon 路径按平台和架构发现。
 
 **领先 master：** 动态查询：`git rev-list --count master..feat/combo-health-fallback`
 
