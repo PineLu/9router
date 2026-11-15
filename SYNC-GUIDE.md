@@ -399,7 +399,7 @@ cd ~/tujia_workspace/9router
 - **发布前回滚备份**：私有目录 ~/.9router-upgrade-backups/pre-version-tailscale-fix-20261115-133120/，权限 700，约 1.3GB。包含生产 SQLite 在线一致性备份、旧 .next（BUILD_ID v2yjQC8rvn5__KId2hMYp）、launchd plist、package-lock、版本元数据、表计数、必要凭据及 Tailscale 状态目录副本；备份 SQLite quick_check/integrity_check 均为 ok。
 - **生产接口验收**：/api/health 返回 ok；/api/version 返回 currentVersion=0.5.116、latestVersion=null、hasUpdate=false；/v1/models HTTP 200，627 models；new-api 容器经 host.containers.internal:20128 访问 PASS。部署脚本的五项检查全部通过，近 100 行日志 malformed=0。
 - **生产数据库对账**：journal_mode=delete、synchronous=2(FULL)、mmap_size=0、quick_check=ok、integrity_check=ok，无 data.sqlite-wal/-shm。与发布前 SQLite 备份逐表计数完全一致：_meta=4、apiKeys=3、combos=3、kv=36、providerConnections=14、providerNodes=3、proxyPools=1、requestDetails=1000、settings=1、usageDaily=41、usageHistory=19919。
-- **Tailscale 验收边界**：Apple Silicon 实机解析器定位到 /opt/homebrew/bin/tailscale 与 /opt/homebrew/bin/tailscaled（1.104.7）；使用独立 /tmp stateDir 启动 userspace daemon，成功创建 socket，CLI status 返回 NeedsLogin。测试进程已停止并清理临时目录；没有执行 tailscale up，没有改动生产 Tailscale state、登录或 Funnel。部署后日志没有新增 /usr/local/bin/tailscaled ENOENT；生产当前未运行独立 tailscaled 进程，登录状态仍为未登录，未把它误报为登录成功。
+- **Tailscale 验收边界**：Apple Silicon 实机解析器定位到 /opt/homebrew/bin/tailscale 与 /opt/homebrew/bin/tailscaled（1.104.7）；使用独立 /tmp stateDir 启动 userspace daemon，成功创建 socket，CLI status 返回 NeedsLogin。测试进程已停止，清理了临时 stateDir 和本次 smoke 创建的默认 logpolicy 文件目录；没有执行 tailscale up，没有改动生产 Tailscale state、登录或 Funnel。部署后日志没有新增 /usr/local/bin/tailscaled ENOENT；生产当前未运行独立 tailscaled 进程，登录状态仍为未登录，未把它误报为登录成功。
 - **结论**：版本更新检查、宿主机 API、跨容器请求、数据库完整性/数据对账和 Tailscale 二进制发现均通过；新源码已正式部署。未执行付费 Provider 生成请求，也未改变 Tailscale 登录状态。
 
 ### 4.2 高频冲突文件预判
