@@ -404,6 +404,17 @@ cd ~/tujia_workspace/9router
 - **Tailscale 验收边界**：Apple Silicon 实机解析器定位到 /opt/homebrew/bin/tailscale 与 /opt/homebrew/bin/tailscaled（1.104.7）；使用独立 /tmp stateDir 启动 userspace daemon，成功创建 socket，CLI status 返回 NeedsLogin。测试进程已停止，清理了临时 stateDir 和本次 smoke 创建的默认 logpolicy 文件目录；没有执行 tailscale up，没有改动生产 Tailscale state、登录或 Funnel。部署后日志没有新增 /usr/local/bin/tailscaled ENOENT；生产当前未运行独立 tailscaled 进程，登录状态仍为未登录，未把它误报为登录成功。
 - **结论**：版本更新检查、宿主机 API、跨容器请求、数据库完整性/数据对账和 Tailscale 二进制发现均通过；新源码已正式部署。未执行付费 Provider 生成请求，也未改变 Tailscale 登录状态。
 
+### 4.1.15 2026-11-15 手机响应式 UI 定制（隔离验收）
+
+- **目的与范围**：基于 `feat/combo-health-fallback @ 440cb4ee`，在独立 worktree `/tmp/9router-mobile-responsive-1115` 和分支 `feat/mobile-responsive-1115` 完成手机端仪表盘改造。保留桌面交互，后端路由、Combo、TLS、SQLite、授权及代理逻辑不作修改。
+- **框架与导航**：`DashboardLayout` 改用动态视口 `dvh`、安全区域、移动端小边距和 `min-w-0` 滚动容器；新增 Endpoint / Providers / Combos / Usage 四项手机快捷底部导航；侧边菜单加入关闭按钮、Esc 退出及不可见时 `inert`，加大移动端触摸区域。
+- **Header/Modal/Drawer**：Header 在手机端将搜索框放到独立整行，保留页面标题、语言及更多菜单，主题切换通过更多菜单访问；Modal 在手机端成为底部弹层；Drawer 自动使用手机全宽，允许内容独立滚动；Card、分页和输入控件调整手机间距及触摸尺寸。
+- **重点页面**：Usage 请求明细与汇总按 `md` 断点切换为可读的移动端卡片，桌面仍用原表格；概览指标手机两列。Combos 视觉模型池在小屏改为可触摸的上移/下移/删除列表；Endpoint URL/云隧道/Tailscale 与 API Key 操作自动换行；Providers 筛选和测试结果弹窗适配小屏。未改动查询、持久化或敏感请求详情的授权边界。
+- **真实浏览器回归**：新增 `tests/smoke/mobile-layout.cjs`，使用本机 headless Google Chrome + `playwright-core`、独立临时 `DATA_DIR`、独立端口 `20129` 和测试登录信息。**320/360/390/430/768/1280px × Endpoint/Providers/Combos/Usage Details/Usage Overview 共 30 组页面全部 PASS**；检查水平滚动溢出、手机导航显示/路由跳转、菜单打开/Esc 关闭、移动端搜索框宽度、请求卡/桌面表切换、全宽 Drawer 以及 API Key 弹窗可见性。临时服务停止并自动清理数据。
+- **工程验收**：Node `v22.22.3` / Next `16.4.6`，独立 `DATA_DIR=/tmp/9router-mobile-build-data-1115` 的 `npm run build` exit 0，最终 BUILD_ID `7pn00nIhnDjqN5u0CDxPf`；11 个定向 Vitest 文件 **107/107 PASS**。ESLint 当前范围与正式源码 baseline 都为 **37 errors / 16 warnings**，按照文件 + ruleId + severity 比对 **新增问题 0**（均为既有诊断），`git diff --check` PASS。
+- **验收限制**：上述是 Chrome 移动视口及桌面视口测试，**尚未在真实 iOS Safari、Android Chrome 真机**上完成交互验收；非核心的其他管理页仍可能需要针对性微调。Browser smoke 测试通过不代表全站所有页面均无移动端问题。
+- **发布边界**：目前只验证源码与隔离构建。**不部署生产、不重启 `com.9router.local`**；正式服务仍运行先前的 BUILD_ID `3OZBXHGfH1VAUj_7Skzqy`。需另行按发布 SOP 备份、构建、部署并验收。
+
 ### 4.2 高频冲突文件预判
 
 以下文件是本 fork 改动最集中的地方，上游若动同区域必然冲突：
